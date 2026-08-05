@@ -33,19 +33,27 @@ const POINTS = [
 ];
 
 export function Caveats() {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(() => localStorage.getItem('ml-caveats-collapsed') !== '1');
+
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    localStorage.setItem('ml-caveats-collapsed', next ? '0' : '1');
+  }
 
   return (
     <section className="rounded-xl border border-amber-500/30 bg-amber-500/5">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={toggle}
         className="flex w-full items-center gap-3 px-5 py-4 text-left"
       >
         <AlertTriangle className="size-5 shrink-0 text-amber-400" />
         <div className="flex-1">
           <h2 className="font-semibold text-amber-200">Read this before using any number below</h2>
           <p className="text-sm text-amber-200/60">
-            Seven things that determine whether this tool helps you or costs you money.
+            {open
+              ? 'Seven things that determine whether this tool helps you or costs you money.'
+              : 'Seven caveats hidden — survivorship bias, reversal underperformance, momentum evidence, entry timing. Click to reopen.'}
           </p>
         </div>
         {open ? (

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BarChart3, CalendarDays, Database, Layers, Loader2 } from 'lucide-react';
+import { ApiHealth } from './ApiHealth';
 import { Caveats } from './Caveats';
 import { StockDetail } from './StockDetail';
 import { StockTable } from './StockTable';
@@ -82,6 +83,8 @@ export default function App() {
               .join(' · ')}
           />
         </div>
+
+        <ApiHealth />
 
         <Caveats />
 

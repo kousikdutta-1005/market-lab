@@ -50,7 +50,8 @@ def main() -> int:
 
     metric_cols = [m for ms in rating.METRICS.values() for m, _ in ms]
     keep = ["name", "sector", "price", "market_cap", "composite", "coverage", "band",
-            "ret_6m", "ret_12m", "ann_vol", "years_of_data", *rating.METRICS.keys(), *metric_cols]
+            "ret_6m", "ret_12m", "ann_vol", "years_of_data", "data_flags",
+            *rating.METRICS.keys(), *metric_cols]
 
     rows = []
     for tk, r in merged.iterrows():
@@ -58,7 +59,10 @@ def main() -> int:
         for c in keep:
             if c in r.index:
                 v = r[c]
-                row[c] = str(v) if c == "band" and pd.notna(v) else clean(v)
+                if c in ("band", "data_flags"):
+                    row[c] = str(v) if pd.notna(v) and str(v) else None
+                else:
+                    row[c] = clean(v)
         rows.append(row)
 
     payload = {
