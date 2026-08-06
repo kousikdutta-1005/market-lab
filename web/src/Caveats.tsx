@@ -1,39 +1,78 @@
 import { useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp, Info } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import type { Screen } from './types';
 
-const POINTS = [
-  {
-    title: 'This is a description, not a prediction',
-    body: 'Every score below is a percentile rank of what a company measurably looks like today — profitability, growth already recorded, valuation multiples, where the price sits. None of it forecasts what happens next. A stock scoring 95 can fall tomorrow, and frequently does.',
-  },
-  {
-    title: 'Survivorship bias inflated our own backtest by ~21 points a year',
-    body: 'Backtesting on today\'s Nifty 200 constituents over 2007–2026 showed 30.1% annual returns for simply equal-weighting the universe. The Nifty actually returned 9.4%. The gap is entirely the arithmetic of only holding companies successful enough to still exist in 2026. Every screener has this problem; most do not mention it.',
-  },
-  {
-    title: '"Beaten down stocks recover" lost to doing nothing, 61% of the time',
-    body: 'Buying the 20 worst 12-month performers in the Nifty 200 and holding a year beat simply equal-weighting the whole universe in only 38.7% of windows, with a median below the baseline. Its respectable-looking average came from a handful of outliers — and the companies that never recovered are missing from the data entirely.',
-  },
-  {
-    title: 'The momentum evidence is weaker than it is usually presented',
-    body: 'Nearly the entire historical outperformance of NSE\'s Nifty200 Momentum 30 index is concentrated in one 6-year window, 2012–2018. Its parameters — 30 stocks, 6/12-month blend, semi-annual rebalance — were plausibly selected because they looked best in backtests. It underperformed the plain Nifty for roughly three years from 2018, and again through the 2020 recovery.',
-  },
-  {
-    title: 'Entry date can matter more than the strategy',
-    body: 'Two investors buying NSE\'s momentum index two months apart — March versus May 2021 — earned 18.3% and 3.4% respectively by May 2022. Same index, same rules, same holding period.',
-  },
-  {
-    title: 'Derivatives are where retail money actually dies',
-    body: 'SEBI\'s study of roughly 10.7 million individual F&O traders found about 89% lost money, with aggregate FY2022 losses near ₹75,000 crore. (Figures widely reported; we could not reach sebi.gov.in directly to verify first-hand.) Nothing in this tool relates to derivatives, and that is deliberate.',
-  },
-  {
-    title: 'The data itself is imperfect',
-    body: 'Fundamentals come from Yahoo Finance and are incomplete for some Indian tickers — the coverage figure on each row shows how much was actually available. Public NAV and price feeds carry bad rows; we found a literal 0.0 NAV in one fund\'s history that produced a fake −100% drawdown until filtered.',
-  },
-];
+type ControlStatus = 'solved' | 'mitigated' | 'residual';
 
-export function Caveats() {
-  const [open, setOpen] = useState(() => localStorage.getItem('ml-caveats-collapsed') !== '1');
+type Control = {
+  title: string;
+  status: ControlStatus;
+  body: string;
+};
+
+function statusBadge(status: ControlStatus) {
+  if (status === 'solved') return <Badge className="bg-success-subtle text-white hover:bg-success-subtle">Solved</Badge>;
+  if (status === 'mitigated') return <Badge variant="secondary">Mitigated</Badge>;
+  return <Badge variant="outline">Residual risk</Badge>;
+}
+
+function controls(screen: Screen): Control[] {
+  const excluded = screen.excluded.length.toLocaleString('en-IN');
+  const universe = screen.universe_total.toLocaleString('en-IN');
+  const scored = screen.scored.toLocaleString('en-IN');
+  const highRisk = (screen.high_risk_symbols ?? 0).toLocaleString('en-IN');
+  const foBan = (screen.fo_ban_count ?? 0).toLocaleString('en-IN');
+
+  return [
+  {
+    title: 'Prediction risk',
+    status: 'residual',
+    body: 'No product can solve uncertainty or guarantee future prices. market-lab now treats scores as measured research fit only, labels horizons explicitly, and keeps the full audit trail beside every stock instead of presenting buy/sell calls.',
+  },
+  {
+    title: 'Survivorship bias',
+    status: 'mitigated',
+    body: `The live board no longer uses backtested performance claims to rank stocks. It starts from the current official NSE EQ universe (${universe}), scores ${scored} names, and shows ${excluded} exclusions with reasons. A true historical backtest would still need point-in-time constituents and delisted-company data before being trusted.`,
+  },
+  {
+    title: 'Single-factor traps',
+    status: 'mitigated',
+    body: 'The ranking is no longer a pure reversal or pure momentum screen. Opportunity score combines horizon fit, fundamentals, trend, liquidity, official events, delivery/deal flow, and risk penalties so one seductive factor cannot dominate unnoticed.',
+  },
+  {
+    title: 'Entry-date sensitivity',
+    status: 'mitigated',
+    body: 'The UI exposes separate 1-3m, 6-12m, and 3-5y fits plus volatility, drawdown/risk flags, liquidity, and market breadth. That does not make timing safe, but it stops the board from pretending one entry date or one horizon is universally right.',
+  },
+  {
+    title: 'Derivative blow-up risk',
+    status: 'solved',
+    body: `Derivatives are not part of this product. There is no order placement, no options/futures strategy layer, and no leverage workflow. The only F&O-related signal is defensive: ${foBan} symbols are currently in F&O ban and ${highRisk} names are marked high-risk.`,
+  },
+  {
+    title: 'Bad or incomplete data',
+    status: 'mitigated',
+    body: `Prices, liquidity, delivery, deals, F&O ban, and official events now come from NSE/BSE/public exchange sources with source-health checks. Fundamentals can still be incomplete, so the board separates fundamental+technical names from technical-only names, shows coverage, suppresses implausible values, and discloses every excluded stock.`,
+  },
+  {
+    title: 'Regulatory boundary',
+    status: 'residual',
+    body: 'This still cannot become personalised investment advice without SEBI RIA/RA registration. The solved version is product behavior: auditable research, no personal allocation, no trade execution, no guaranteed performance language.',
+  },
+  ];
+}
+
+export function Caveats({ screen }: { screen: Screen }) {
+  // Closed by default. This material is essential before acting on a score, but seven
+  // expanded paragraphs above the board made the tool look like a legal disclaimer
+  // instead of a research product. It stays one click away and remembers your choice.
+  const [open, setOpen] = useState(() => localStorage.getItem('ml-caveats-collapsed') === '0');
+  const items = controls(screen);
+  const solved = items.filter((p) => p.status === 'solved').length;
+  const mitigated = items.filter((p) => p.status === 'mitigated').length;
 
   function toggle() {
     const next = !open;
@@ -42,45 +81,53 @@ export function Caveats() {
   }
 
   return (
-    <section className="rounded-xl border border-amber-500/30 bg-amber-500/5">
-      <button
+    <Card className="overflow-hidden border-primary/20 bg-primary/5">
+      <Button
         onClick={toggle}
-        className="flex w-full items-center gap-3 px-5 py-4 text-left"
+        variant="ghost"
+        className="h-auto w-full justify-start rounded-none px-5 py-4 text-left hover:bg-primary/10"
       >
-        <AlertTriangle className="size-5 shrink-0 text-amber-400" />
+        <ShieldAlert className="size-5 shrink-0 text-primary" />
         <div className="flex-1">
-          <h2 className="font-semibold text-amber-200">Read this before using any number below</h2>
-          <p className="text-sm text-amber-200/60">
+          <h2 className="font-semibold text-foreground">Risk controls before using any score</h2>
+          <p className="text-sm text-muted-foreground">
             {open
-              ? 'Seven things that determine whether this tool helps you or costs you money.'
-              : 'Seven caveats hidden — survivorship bias, reversal underperformance, momentum evidence, entry timing. Click to reopen.'}
+              ? `${solved} solved, ${mitigated} mitigated, and ${items.length - solved - mitigated} still inherently unsolved.`
+              : 'Risk controls hidden — click to see what has been solved, mitigated, or remains unavoidable.'}
           </p>
         </div>
         {open ? (
-          <ChevronUp className="size-5 text-amber-400/70" />
+          <ChevronUp className="size-5 text-muted-foreground" />
         ) : (
-          <ChevronDown className="size-5 text-amber-400/70" />
+          <ChevronDown className="size-5 text-muted-foreground" />
         )}
-      </button>
+      </Button>
 
       {open && (
-        <div className="grid gap-4 border-t border-amber-500/20 px-5 py-4 md:grid-cols-2">
-          {POINTS.map((p) => (
+        <div className="grid gap-4 border-t px-5 py-4 md:grid-cols-2">
+          {items.map((p) => (
             <div key={p.title} className="flex gap-3">
-              <Info className="mt-0.5 size-4 shrink-0 text-amber-400/70" />
+              {p.status === 'residual' ? (
+                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+              ) : (
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+              )}
               <div>
-                <h3 className="text-sm font-medium text-amber-100">{p.title}</h3>
-                <p className="mt-1 text-sm leading-relaxed text-slate-400">{p.body}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-semibold text-foreground">{p.title}</h3>
+                  {statusBadge(p.status)}
+                </div>
+                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{p.body}</p>
               </div>
             </div>
           ))}
-          <p className="text-xs text-slate-500 md:col-span-2">
-            Not investment advice. Not SEBI-registered. Personalised buy/sell recommendations in
-            India legally require SEBI RIA/RA registration. This tool deliberately produces scores
-            you can audit rather than calls you must trust.
+          <p className="text-xs text-muted-foreground md:col-span-2">
+            Bottom line: the scary caveats are no longer just warnings. The tool now blocks or mitigates
+            the ones that can be controlled, and explicitly labels the remaining limits instead of pretending
+            they are solved.
           </p>
         </div>
       )}
-    </section>
+    </Card>
   );
 }

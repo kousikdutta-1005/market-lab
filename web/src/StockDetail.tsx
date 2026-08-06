@@ -1,4 +1,18 @@
-import { Radar, RadarChart, PolarAngleAxis, PolarGrid, ResponsiveContainer } from 'recharts';
+import { useEffect, useState } from 'react';
+import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  Radar,
+  RadarChart,
+  PolarAngleAxis,
+  PolarGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import {
   Activity,
   BarChart3,
@@ -8,12 +22,19 @@ import {
   Gauge,
   Info,
   Layers,
-  LineChart,
+  LineChart as LineChartIcon,
   Percent,
   Scale,
+  ShieldAlert,
   TriangleAlert,
+  Users,
   X,
 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
+import { SegmentedControl } from './SegmentedControl';
+import { OwnershipBadge } from './OwnershipBadge';
 import {
   BASIS_HELP,
   BUCKET_LABEL,
@@ -30,7 +51,21 @@ import {
   type Pillar,
   type Screen,
   type Stock,
+  type StockChartResponse,
 } from './types';
+import { loadChart } from '@/lib/dataSource';
+
+const CHART_RANGES = ['3m', '6m', '1y', '2y'] as const;
+
+const PANES = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'risk', label: 'Risk & flow' },
+  { key: 'fundamentals', label: 'Fundamentals' },
+  { key: 'technicals', label: 'Technicals' },
+  { key: 'audit', label: 'Audit' },
+] as const;
+type PaneKey = (typeof PANES)[number]['key'];
+type ChartRange = (typeof CHART_RANGES)[number];
 
 const FLAG_HELP: Record<string, string> = {
   negative_equity:
@@ -42,6 +77,18 @@ const FLAG_HELP: Record<string, string> = {
   net_margin_unreliable:
     'Net margin came from the same statements that produced an implausible operating figure, or exceeded operating margin. Suppressed as untrustworthy.',
 };
+
+function shortDate(value: string) {
+  return new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
+function tooltipValue(value: unknown, name: unknown) {
+  const n = String(name);
+  const v = Number(value);
+  if (!Number.isFinite(v)) return ['—', n];
+  if (n === 'Turnover') return [formatTurnover(v), n];
+  return [`₹${v.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, n];
+}
 
 type MetricSpec = {
   label: string;
@@ -84,26 +131,28 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-slate-800 bg-slate-950/35">
-      <div className="flex items-start gap-2 border-b border-slate-800 px-4 py-3">
-        <Icon className="mt-0.5 size-4 shrink-0 text-slate-500" />
+    <Card>
+      <CardHeader className="flex-row items-start gap-2 border-b">
+        <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <div>
-          <h3 className="text-sm font-medium text-slate-200">{title}</h3>
-          {subtitle && <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{subtitle}</p>}
+          <h3 className="font-heading text-sm font-medium text-foreground">{title}</h3>
+          {subtitle && <CardDescription className="mt-0.5 text-xs leading-relaxed">{subtitle}</CardDescription>}
         </div>
-      </div>
-      <div className="p-4">{children}</div>
-    </section>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
   );
 }
 
 function MiniStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-3">
-      <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-1 text-sm font-medium tabular-nums text-slate-100">{value}</div>
-      {hint && <div className="mt-1 text-xs leading-relaxed text-slate-500">{hint}</div>}
-    </div>
+    <Card size="sm">
+      <CardContent>
+        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+        <div className="mt-1 text-sm font-medium tabular-nums text-foreground">{value}</div>
+        {hint && <div className="mt-1 text-xs leading-relaxed text-muted-foreground">{hint}</div>}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -111,12 +160,14 @@ function MetricGrid({ items }: { items: MetricSpec[] }) {
   return (
     <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
       {items.map((m) => (
-        <div key={m.label} className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
-          <dt className="text-[11px] uppercase tracking-wide text-slate-500">{m.label}</dt>
-          <dd className={`mt-1 text-sm font-medium tabular-nums ${m.muted ? 'text-slate-500' : 'text-slate-100'}`}>
+        <Card key={m.label} size="sm">
+          <CardContent>
+          <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{m.label}</dt>
+          <dd className={`mt-1 text-sm font-medium tabular-nums ${m.muted ? 'text-muted-foreground' : 'text-foreground'}`}>
             {formatValue(m.value, m.kind)}
           </dd>
-        </div>
+          </CardContent>
+        </Card>
       ))}
     </dl>
   );
@@ -135,16 +186,16 @@ function PillarScore({
   return (
     <div>
       <div className="mb-1 flex items-center justify-between gap-3">
-        <div className="text-sm font-medium capitalize text-slate-200">{pillar}</div>
+        <div className="text-sm font-medium capitalize text-foreground">{pillar}</div>
         <span className={`text-sm font-semibold tabular-nums ${scoreColor(score)}`}>
           {score?.toFixed(0) ?? 'n/a'}
-          <span className="ml-1 text-xs font-normal text-slate-600">×{(weight * 100).toFixed(0)}%</span>
+          <span className="ml-1 text-xs font-normal text-muted-foreground">×{(weight * 100).toFixed(0)}%</span>
         </span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
         <div className={`h-full rounded-full ${scoreBg(score)}`} style={{ width: `${Math.max(0, score ?? 0)}%` }} />
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-slate-500">{PILLAR_HELP[pillar]}</p>
+      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{PILLAR_HELP[pillar]}</p>
     </div>
   );
 }
@@ -153,11 +204,21 @@ export function StockDetail({
   stock,
   screen,
   onClose,
+  variant = 'desktop',
 }: {
   stock: Stock;
   screen: Screen;
   onClose: () => void;
+  variant?: 'desktop' | 'sheet';
 }) {
+  // The factsheet carries the full audit trail, which is ~7 screens of scrolling in one
+  // column. Grouping it into panes puts the answer first and keeps the evidence one tap
+  // away, without removing anything.
+  const [pane, setPane] = useState<PaneKey>('overview');
+  const [chartRange, setChartRange] = useState<ChartRange>('1y');
+  const [chart, setChart] = useState<StockChartResponse | null>(null);
+  const [chartError, setChartError] = useState<string | null>(null);
+  const [chartLoading, setChartLoading] = useState(false);
   const peerCount = screen.stocks.filter((x) => x.rating_basis === stock.rating_basis && x.bucket === stock.bucket).length;
   const flags = (stock.data_flags ?? '').split(',').filter(Boolean);
   const bucketLabel = stock.bucket ? BUCKET_LABEL[stock.bucket] : 'Unknown';
@@ -168,6 +229,34 @@ export function StockDetail({
     pillar: p.charAt(0).toUpperCase() + p.slice(1),
     value: stock[p] ?? 0,
   }));
+  const lastChartPoint = chart?.points.length ? chart.points[chart.points.length - 1] : null;
+  const firstChartPoint = chart?.points.length ? chart.points[0] : null;
+  const shellClass =
+    variant === 'sheet'
+      ? 'flex h-full min-w-0 flex-col overflow-hidden bg-card'
+      : 'flex h-full min-w-0 flex-col self-start overflow-hidden rounded-xl border bg-card xl:sticky xl:top-[88px] xl:max-h-[calc(100vh-6rem)]';
+
+  useEffect(() => {
+    let cancelled = false;
+    setChartLoading(true);
+    setChartError(null);
+    loadChart(stock.symbol, chartRange)
+      .then((data) => {
+        if (!cancelled) setChart(data);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setChart(null);
+          setChartError(error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setChartLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [stock.symbol, chartRange]);
 
   const valuation: MetricSpec[] = [
     { label: 'Market cap', value: stock.market_cap, kind: 'currency' },
@@ -206,118 +295,348 @@ export function StockDetail({
   ];
 
   return (
-    <aside className="flex h-full min-w-0 flex-col self-start overflow-hidden rounded-xl border border-slate-800 bg-slate-900/40 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)]">
-      <header className="border-b border-slate-800 p-4">
+    <aside className={shellClass}>
+      <header className="border-b p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-xl font-semibold text-slate-100">{stock.symbol}</h2>
-              <span className="rounded bg-teal-500/10 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-teal-300">
+              <h2 className="text-xl font-semibold text-foreground">{stock.symbol}</h2>
+              <Badge variant="secondary">
                 {bucketLabel}
-              </span>
+              </Badge>
               {stock.rating_basis === 'technical only' && (
-                <span className="flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-amber-300">
-                  <LineChart className="size-3" />
+                <Badge variant="outline" className="border-warning/30 bg-warning-subtle text-warning hover:bg-warning-subtle">
+                 <LineChartIcon className="size-3" />
                   technical only
-                </span>
+                </Badge>
               )}
+              <OwnershipBadge stock={stock} />
             </div>
-            <p className="mt-1 truncate text-sm text-slate-300">{stock.name}</p>
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 truncate text-sm text-foreground">{stock.name}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
               {stock.sector ?? 'Unknown sector'} · {price}
               {stock.market_cap ? ` · ${formatCrore(stock.market_cap)}` : ''}
             </p>
+            <div className="mt-2 flex gap-3">
+              <a href={`https://www.screener.in/company/${stock.symbol.replace('-EQ', '')}/`} target="_blank" rel="noreferrer" className="text-xs font-medium text-primary hover:underline">Screener.in</a>
+              <a href={`https://in.tradingview.com/chart/?symbol=NSE:${stock.symbol.replace('-EQ', '')}`} target="_blank" rel="noreferrer" className="text-xs font-medium text-primary hover:underline">TradingView</a>
+            </div>
           </div>
-          <button onClick={onClose} className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-300">
+          <Button onClick={onClose} variant="ghost" size="icon-sm" aria-label="Close factsheet">
             <X className="size-4" />
-          </button>
+          </Button>
         </div>
       </header>
 
-      <div className="flex-1 space-y-4 overflow-auto p-4">
-        <section className="rounded-xl border border-slate-800 bg-slate-950/35 p-4">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-4 sm:p-5">
+        <Card>
+          <CardContent>
           <div className="grid gap-4 sm:grid-cols-[auto_1fr]">
             <div className="flex items-center gap-3">
               <span className={`text-5xl font-bold tabular-nums ${scoreColor(stock.composite)}`}>
                 {stock.composite?.toFixed(0) ?? '—'}
               </span>
               <div>
-                <div className="text-sm font-medium text-slate-200">{stock.band ?? 'Not rated'}</div>
-                <div className="text-xs text-slate-500">{percentileText(stock.composite)}</div>
+                <div className="text-sm font-medium text-foreground">{stock.band ?? 'Not rated'}</div>
+                <div className="text-xs text-muted-foreground">{percentileText(stock.composite)}</div>
                 {stock.composite_raw != null && (
-                  <div className="text-xs text-slate-600">raw average {stock.composite_raw.toFixed(1)}</div>
+                  <div className="text-xs text-muted-foreground">raw average {stock.composite_raw.toFixed(1)}</div>
                 )}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
+              <MiniStat label="Opportunity" value={stock.opportunity_score?.toFixed(0) ?? '—'} hint="Fit + flows − risk" />
               <MiniStat label="Peer group" value={`${peerCount.toLocaleString('en-IN')} stocks`} hint={`${bucketLabel}-cap, same rating basis`} />
               <MiniStat label="Data coverage" value={`${((stock.coverage ?? 0) * 100).toFixed(0)}%`} hint={`${stock.pillars_used ?? 0} of 5 pillars used`} />
               <MiniStat label="Median turnover" value={formatTurnover(stock.turnover_median)} hint="NSE traded value/day" />
               <MiniStat label="Trades/day" value={formatValue(stock.trades_median, 'integer')} hint="Median number of trades" />
             </div>
           </div>
-          <p className="mt-3 border-t border-slate-800 pt-3 text-xs leading-relaxed text-slate-500">
+          <p className="mt-3 border-t pt-3 text-xs leading-relaxed text-muted-foreground">
             This describes what the company looks like now — not what the share price will do next.
           </p>
-        </section>
+          </CardContent>
+        </Card>
 
         {stock.rating_basis === 'technical only' && (
-          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-            <div className="mb-1.5 flex items-center gap-2 text-sm font-medium text-amber-200">
-              <LineChart className="size-4" /> Technical only — no fundamentals
+          <Card className="border-warning/30 bg-warning-subtle">
+            <CardContent>
+            <div className="mb-1.5 flex items-center gap-2 text-sm font-medium text-warning">
+              <LineChartIcon className="size-4" /> Technical only — no fundamentals
             </div>
-            <p className="text-xs leading-relaxed text-slate-400">{BASIS_HELP['technical only']}</p>
-          </div>
+            <p className="text-xs leading-relaxed text-warning">{BASIS_HELP['technical only']}</p>
+            </CardContent>
+          </Card>
         )}
 
         {flags.length > 0 && (
-          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-            <div className="mb-1.5 flex items-center gap-2 text-sm font-medium text-amber-200">
+          <Card className="border-warning/30 bg-warning-subtle">
+            <CardContent>
+            <div className="mb-1.5 flex items-center gap-2 text-sm font-medium text-warning">
               <TriangleAlert className="size-4" /> Data quality flags
             </div>
             <ul className="space-y-1.5">
               {flags.map((f) => (
-                <li key={f} className="text-xs leading-relaxed text-slate-400">
-                  <span className="font-mono text-amber-300/80">{f}</span> — {FLAG_HELP[f] ?? 'Value suppressed.'}
+                <li key={f} className="text-xs leading-relaxed text-warning">
+                  <span className="font-mono text-warning">{f}</span> — {FLAG_HELP[f] ?? 'Value suppressed.'}
                 </li>
               ))}
             </ul>
-          </div>
+            </CardContent>
+          </Card>
         )}
+
+        <SegmentedControl
+          label="Factsheet section"
+          value={pane}
+          onChange={setPane}
+          size="sm"
+          items={PANES.map((t) => ({ value: t.key, label: t.label }))}
+        />
+
+        {pane === 'overview' && (<>
+        {(stock.sast_events_180d ?? 0) > 0 && stock.sast_latest_holder && (
+          <Card size="sm">
+            <CardContent>
+              <div className="flex items-start gap-2">
+                <Users className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                <div className="min-w-0">
+                  <div className="t-body font-medium text-foreground">
+                    {stock.sast_latest_holder} {stock.sast_latest_action}
+                    {stock.sast_latest_stake != null && ` — now holds ${stock.sast_latest_stake.toFixed(2)}%`}
+                  </div>
+                  <div className="t-meta text-muted-foreground">
+                    {stock.sast_events_180d} large-holder filing{(stock.sast_events_180d ?? 0) === 1 ? '' : 's'} in 180 days
+                    {stock.sast_latest_date ? ` · latest ${stock.sast_latest_date}` : ''} · see Risk &amp; flow for detail
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        <Section
+          icon={BarChart3}
+          title="Price, trend and participation"
+          subtitle={`Exchange EOD chart from NSE bhavcopy. Latest point: ${chart?.last_date ?? screen.last_trading_session}.`}
+        >
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <SegmentedControl
+              label="Chart range"
+              value={chartRange}
+              onChange={setChartRange}
+              size="sm"
+              className="w-full sm:w-auto"
+              items={CHART_RANGES.map((r) => ({ value: r, label: r.toUpperCase() }))}
+            />
+            <div className="text-xs text-muted-foreground">{chart?.source ?? 'Loading local price cache'}</div>
+          </div>
+
+          {chartLoading && <div className="grid h-60 place-items-center text-sm text-muted-foreground">Loading chart…</div>}
+          {!chartLoading && chartError && (
+            <div className="rounded-lg border border-warning/30 bg-warning-subtle p-3 text-sm text-warning">
+              Chart unavailable: {chartError}
+            </div>
+          )}
+          {!chartLoading && chart && chart.points.length > 0 && (
+            <>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={chart.points} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid stroke="var(--border)" vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={shortDate}
+                      tick={{ fill: 'var(--muted-foreground)', fontSize: 11 }}
+                      minTickGap={24}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      yAxisId="price"
+                      domain={['auto', 'auto']}
+                      tick={{ fill: 'var(--muted-foreground)', fontSize: 11 }}
+                      tickFormatter={(v: number) => `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+                      tickLine={false}
+                      width={56}
+                    />
+                    <YAxis yAxisId="turnover" orientation="right" hide />
+                    <Tooltip
+                      formatter={tooltipValue}
+                      labelFormatter={(label: unknown) => shortDate(String(label))}
+                      contentStyle={{
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius)',
+                        background: 'var(--popover)',
+                        color: 'var(--popover-foreground)',
+                        boxShadow: '0 12px 34px rgb(0 0 0 / 0.12)',
+                      }}
+                    />
+                    <Bar yAxisId="turnover" dataKey="turnover" name="Turnover" fill="var(--chart-2)" radius={[4, 4, 0, 0]} opacity={0.55} />
+                    <Line yAxisId="price" type="monotone" dataKey="close" name="Close" stroke="var(--primary)" strokeWidth={2.4} dot={false} />
+                    <Line yAxisId="price" type="monotone" dataKey="ma50" name="50 DMA" stroke="var(--success)" strokeWidth={1.6} dot={false} connectNulls />
+                    <Line yAxisId="price" type="monotone" dataKey="ma200" name="200 DMA" stroke="var(--warning)" strokeWidth={1.6} dot={false} connectNulls />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <MiniStat
+                  label="Range move"
+                  value={lastChartPoint?.return_pct != null ? `${lastChartPoint.return_pct >= 0 ? '+' : ''}${lastChartPoint.return_pct.toFixed(1)}%` : '—'}
+                  hint={firstChartPoint ? `Since ${shortDate(firstChartPoint.date)}` : undefined}
+                />
+                <MiniStat
+                  label="Market move"
+                  value={lastChartPoint?.market_return_pct != null ? `${lastChartPoint.market_return_pct >= 0 ? '+' : ''}${lastChartPoint.market_return_pct.toFixed(1)}%` : '—'}
+                  hint="Equal-weighted NSE bhavcopy universe"
+                />
+                <MiniStat
+                  label="Last turnover"
+                  value={formatTurnover(lastChartPoint?.turnover ?? null)}
+                  hint={lastChartPoint ? shortDate(lastChartPoint.date) : undefined}
+                />
+              </div>
+            </>
+          )}
+        </Section>
 
         <Section icon={Gauge} title="Research fit by horizon" subtitle="Weighted research rankings, not personal advice or a buy/sell call.">
           <div className="grid gap-2 sm:grid-cols-3">
             {HORIZONS.map((h) => (
-              <div
+              <Card
                 key={h.key}
-                className={`rounded-lg border p-3 ${
+                className={
                   stock.best_horizon === h.key
-                    ? 'border-teal-500/40 bg-teal-500/10'
-                    : 'border-slate-800 bg-slate-900/40'
-                }`}
+                    ? 'border-primary/40 bg-primary/5'
+                    : ''
+                }
+                size="sm"
               >
+                <CardContent>
                 <div className="flex items-center justify-between">
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500">{h.label}</div>
+                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{h.label}</div>
                   {stock.best_horizon === h.key && (
-                    <span className="rounded bg-teal-500/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-teal-200">
+                    <Badge variant="secondary">
                       best fit
-                    </span>
+                    </Badge>
                   )}
                 </div>
                 <div className={`mt-1 text-2xl font-semibold tabular-nums ${scoreColor(stock[h.scoreKey])}`}>
                   {stock[h.scoreKey]?.toFixed(0) ?? '—'}
                 </div>
-                <p className="mt-1 text-xs leading-relaxed text-slate-500">{h.detail}</p>
-              </div>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{h.detail}</p>
+                </CardContent>
+              </Card>
             ))}
           </div>
-          <p className="mt-3 text-xs leading-relaxed text-slate-500">
-            Best horizon: <span className="text-slate-300">{stock.best_horizon ? HORIZON_LABEL[stock.best_horizon] : '—'}</span>.
-            The score combines fundamentals, technicals, liquidity and official NSE events.
+          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+            Best horizon: <span className="text-foreground">{stock.best_horizon ? HORIZON_LABEL[stock.best_horizon] : '—'}</span>.
+            The score combines fundamentals, technicals, liquidity and official NSE/BSE events.
           </p>
         </Section>
 
-        <Section icon={CalendarDays} title="Official events / news" subtitle="NSE corporate announcements from the last 14 days.">
+        </>)}
+
+        {pane === 'risk' && (<>
+        <Section icon={ShieldAlert} title="Risk lens" subtitle="A high score is not useful if the stock is hard to trade, under restriction, or full of bad data.">
+          <div className="grid gap-2 sm:grid-cols-4">
+            <MiniStat label="Risk level" value={stock.risk_level ?? '—'} />
+            <MiniStat label="Risk score" value={stock.risk_score?.toFixed(0) ?? '—'} />
+            <MiniStat label="F&O ban" value={stock.fno_ban ? 'Yes' : 'No'} />
+            <MiniStat label="Flags" value={(stock.risk_flags ? stock.risk_flags.split(',').length : 0).toLocaleString('en-IN')} />
+          </div>
+          {stock.risk_flags ? (
+            <p className="mt-3 rounded-lg border border-warning/30 bg-warning-subtle p-3 text-xs leading-relaxed text-warning">
+              {stock.risk_flags}
+            </p>
+          ) : (
+            <p className="mt-3 text-xs leading-relaxed text-muted-foreground">No major local risk flags fired for this symbol.</p>
+          )}
+        </Section>
+
+        <Section icon={Droplets} title="Delivery and large-deal flow" subtitle="Free exchange evidence for participation and unusual activity. Direction still needs human interpretation.">
+          <div className="grid gap-2 sm:grid-cols-4">
+            <MiniStat label="Delivery score" value={stock.delivery_accumulation_score?.toFixed(0) ?? '—'} />
+            <MiniStat label="Latest delivery" value={stock.delivery_pct_latest != null ? `${stock.delivery_pct_latest.toFixed(1)}%` : '—'} />
+            <MiniStat label="20d median" value={stock.delivery_pct_median_20d != null ? `${stock.delivery_pct_median_20d.toFixed(1)}%` : '—'} />
+            <MiniStat label="High-delivery days" value={formatValue(stock.high_delivery_days_20d, 'integer')} />
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-4">
+            <MiniStat label="Deal activity" value={stock.deal_activity_score?.toFixed(0) ?? '—'} />
+            <MiniStat label="Bulk / block / short" value={`${stock.bulk_deal_count?.toFixed(0) ?? 0}/${stock.block_deal_count?.toFixed(0) ?? 0}/${stock.short_deal_count?.toFixed(0) ?? 0}`} />
+            <MiniStat label="Deal value" value={formatTurnover(stock.deal_value)} />
+            <MiniStat label="Net deal qty" value={formatValue(stock.deal_net_qty, 'integer')} />
+          </div>
+          {(stock.deal_count ?? 0) > 0 ? (
+            <Card className="mt-3" size="sm">
+              <CardContent>
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Latest large-deal row</div>
+              <p className="mt-1 text-sm text-foreground">
+                {stock.deal_latest_type || 'deal'} {stock.deal_latest_side ? `· ${stock.deal_latest_side}` : ''} · {stock.deal_latest_client || 'client not disclosed'}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">{stock.deal_latest_date ?? ''}</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <p className="mt-3 text-xs leading-relaxed text-muted-foreground">No NSE bulk/block/short-deal row in the current snapshot.</p>
+          )}
+        </Section>
+
+        <Section
+          icon={Users}
+          title="Large shareholders"
+          subtitle="SEBI SAST filings: anyone crossing 5% of a company must disclose it, and so must promoters."
+        >
+          {(stock.sast_events_180d ?? 0) > 0 ? (
+            <>
+              <div className="grid gap-2 sm:grid-cols-4">
+                <MiniStat label="Filings (180d)" value={String(stock.sast_events_180d ?? 0)} />
+                <MiniStat label="Acquisitions" value={String(stock.sast_acquisitions ?? 0)} />
+                <MiniStat label="Disposals" value={String(stock.sast_disposals ?? 0)} />
+                <MiniStat
+                  label="Net shares"
+                  value={formatValue(stock.sast_net_shares, 'integer')}
+                  hint={(stock.sast_net_shares ?? 0) >= 0 ? 'net accumulation' : 'net reduction'}
+                />
+              </div>
+              {(stock.sast_promoter_buying || stock.sast_promoter_selling) && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {stock.sast_promoter_buying && (
+                    <Badge variant="outline" className="border-success/30 bg-success-subtle text-success">
+                      promoter buying
+                    </Badge>
+                  )}
+                  {stock.sast_promoter_selling && (
+                    <Badge variant="outline" className="border-warning/30 bg-warning-subtle text-warning">
+                      promoter selling
+                    </Badge>
+                  )}
+                </div>
+              )}
+              {stock.sast_latest_holder && (
+                <Card className="mt-3" size="sm">
+                  <CardContent>
+                    <div className="t-label">Most recent filing</div>
+                    <p className="mt-1 text-sm text-foreground">
+                      {stock.sast_latest_holder} {stock.sast_latest_action}
+                      {stock.sast_latest_stake != null && ` — now holds ${stock.sast_latest_stake.toFixed(2)}%`}
+                    </p>
+                    <p className="mt-1 t-meta text-muted-foreground">{stock.sast_latest_date ?? ''}</p>
+                  </CardContent>
+                </Card>
+              )}
+              <p className="mt-3 t-meta text-muted-foreground">
+                A disclosure says a stake changed, not why. Funds rebalance, estates get divided and
+                promoters pledge. Evidence to weigh, not a signal to follow.
+              </p>
+            </>
+          ) : (
+            <p className="t-body text-muted-foreground">
+              No SAST filing for this stock in the last 180 days. Most companies have none in a given
+              window — it only triggers above 5%, or on promoter activity.
+            </p>
+          )}
+        </Section>
+
+        <Section icon={CalendarDays} title="Official events / news" subtitle="NSE + BSE corporate announcements from the current event window.">
           <div className="grid gap-2 sm:grid-cols-4">
             <MiniStat label="Event score" value={stock.news_event_score?.toFixed(0) ?? '—'} />
             <MiniStat label="Events" value={formatValue(stock.news_count_14d, 'integer')} />
@@ -325,28 +644,33 @@ export function StockDetail({
             <MiniStat label="Risk flags" value={formatValue(stock.news_negative_14d, 'integer')} />
           </div>
           {stock.news_last_title ? (
-            <div className="mt-3 rounded-lg border border-slate-800 bg-slate-900/40 p-3">
-              <div className="text-[11px] uppercase tracking-wide text-slate-500">Latest announcement</div>
-              <p className="mt-1 text-sm text-slate-200">{stock.news_last_title}</p>
-              <p className="mt-1 text-xs text-slate-500">{stock.news_last_date ?? ''}</p>
+            <Card className="mt-3" size="sm">
+              <CardContent>
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Latest announcement</div>
+              <p className="mt-1 text-sm text-foreground">{stock.news_last_title}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{stock.news_last_date ?? ''}</p>
               {stock.news_last_url && (
                 <a
                   href={stock.news_last_url}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-2 inline-block text-xs text-teal-300 hover:text-teal-200"
+                  className="mt-2 inline-block text-xs text-primary underline-offset-4 hover:underline"
                 >
-                  Open NSE attachment
+                  Open exchange attachment
                 </a>
               )}
-            </div>
+              </CardContent>
+            </Card>
           ) : (
-            <p className="mt-3 text-xs leading-relaxed text-slate-500">
-              No official NSE announcement was found for this stock in the current event window.
+            <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+              No official NSE/BSE announcement was found for this stock in the current event window.
             </p>
           )}
         </Section>
 
+        </>)}
+
+        {pane === 'fundamentals' && (<>
         <Section icon={Building2} title="Company facts" subtitle="Screener-style quick snapshot from the current cached public data.">
           <MetricGrid
             items={[
@@ -358,14 +682,8 @@ export function StockDetail({
             ]}
           />
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
-              <div className="text-[11px] uppercase tracking-wide text-slate-500">Sector</div>
-              <div className="mt-1 text-sm text-slate-100">{stock.sector ?? 'Unknown'}</div>
-            </div>
-            <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
-              <div className="text-[11px] uppercase tracking-wide text-slate-500">Peer bucket</div>
-              <div className="mt-1 text-sm text-slate-100">{bucketLabel}</div>
-            </div>
+            <MiniStat label="Sector" value={stock.sector ?? 'Unknown'} />
+            <MiniStat label="Peer bucket" value={bucketLabel} />
           </div>
         </Section>
 
@@ -380,12 +698,15 @@ export function StockDetail({
           </div>
         </Section>
 
+        </>)}
+
+        {pane === 'technicals' && (<>
         <Section icon={Activity} title="Returns and technicals" subtitle={`Measured through ${screen.last_trading_session}.`}>
           <MetricGrid items={growth.slice(2)} />
           <div className="mt-2">
             <MetricGrid items={technicals} />
           </div>
-          <p className="mt-3 text-xs leading-relaxed text-slate-500">
+          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
             DMA and 52-week values below are percentage-point distances from the current price.
           </p>
         </Section>
@@ -397,7 +718,7 @@ export function StockDetail({
             <MiniStat label="Sessions" value={formatValue(stock.sessions, 'integer')} />
           </div>
           {positionShare != null && (
-            <p className={`mt-3 text-xs leading-relaxed ${positionShare > 0.01 ? 'text-amber-300/90' : 'text-slate-500'}`}>
+            <p className={`mt-3 text-xs leading-relaxed ${positionShare > 0.01 ? 'text-warning' : 'text-muted-foreground'}`}>
               A ₹1 lakh position is <span className="font-medium">{(positionShare * 100).toFixed(2)}%</span> of a typical day's
               trading
               {positionShare > 0.01
@@ -420,30 +741,33 @@ export function StockDetail({
             <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
                 <RadarChart data={radar} outerRadius="72%">
-                  <PolarGrid stroke="#334155" />
-                  <PolarAngleAxis dataKey="pillar" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                  <Radar dataKey="value" stroke="#2dd4bf" fill="#2dd4bf" fillOpacity={0.25} />
+                  <PolarGrid stroke="var(--border)" />
+                  <PolarAngleAxis dataKey="pillar" tick={{ fill: 'var(--muted-foreground)', fontSize: 11 }} />
+                  <Radar dataKey="value" stroke="var(--primary)" fill="var(--primary)" fillOpacity={0.18} />
                 </RadarChart>
               </ResponsiveContainer>
             </div>
           </Section>
         )}
 
+        </>)}
+
+        {pane === 'audit' && (<>
         <Section icon={Layers} title="Raw inputs by pillar" subtitle="The numbers below are the inputs used to build the score.">
           <div className="space-y-4">
             {PILLARS.map((p: Pillar) => (
               <div key={p}>
                 <div className="mb-2 flex items-baseline justify-between">
-                  <div className="text-sm font-medium capitalize text-slate-200">{p}</div>
+                  <div className="text-sm font-medium capitalize text-foreground">{p}</div>
                   <span className={`text-sm font-semibold tabular-nums ${scoreColor(stock[p])}`}>
                     {stock[p]?.toFixed(0) ?? 'n/a'}
                   </span>
                 </div>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-1">
                   {(screen.metrics[p] ?? []).map((m) => (
-                    <div key={m} className="flex justify-between border-b border-slate-800/50 py-1">
-                      <dt className="text-xs text-slate-500">{METRIC_LABELS[m] ?? m}</dt>
-                      <dd className="text-xs tabular-nums text-slate-300">
+                    <div key={m} className="flex justify-between border-b py-1">
+                      <dt className="text-xs text-muted-foreground">{METRIC_LABELS[m] ?? m}</dt>
+                      <dd className="text-xs tabular-nums text-foreground">
                         {formatMetric(m, (stock as unknown as Record<string, number | null>)[m])}
                       </dd>
                     </div>
@@ -455,7 +779,7 @@ export function StockDetail({
         </Section>
 
         <Section icon={CalendarDays} title="What is still not here" subtitle="Screener.in has licensed / scraped pages we should not copy blindly.">
-          <p className="text-xs leading-relaxed text-slate-500">
+          <p className="text-xs leading-relaxed text-muted-foreground">
             This panel now shows every fundamental, technical, liquidity and data-quality field currently available in
             market-lab's public-data cache. It still does not include quarterly P&L tables, balance sheet line items,
             cash-flow statements, shareholding patterns, concalls or annual reports. Those need separate, source-specific
@@ -463,7 +787,9 @@ export function StockDetail({
           </p>
         </Section>
 
-        <p className="flex gap-2 text-xs leading-relaxed text-slate-500">
+        </>)}
+
+        <p className="flex gap-2 text-xs leading-relaxed text-muted-foreground">
           <Info className="mt-0.5 size-3.5 shrink-0" />
           <span>
             These are measured characteristics as of {screen.last_trading_session}, ranked against same-size peers on

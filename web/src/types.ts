@@ -25,6 +25,41 @@ export interface Stock {
   news_last_date: string | null;
   news_last_title: string | null;
   news_last_url: string | null;
+  deal_activity_score: number | null;
+  deal_count: number | null;
+  bulk_deal_count: number | null;
+  block_deal_count: number | null;
+  short_deal_count: number | null;
+  deal_value: number | null;
+  bulk_deal_value: number | null;
+  block_deal_value: number | null;
+  deal_net_qty: number | null;
+  deal_latest_client: string | null;
+  deal_latest_type: string | null;
+  deal_latest_side: string | null;
+  deal_latest_date: string | null;
+  delivery_accumulation_score: number | null;
+  delivery_pct_latest: number | null;
+  delivery_pct_median_20d: number | null;
+  delivery_value_median_20d: number | null;
+  delivery_spike: number | null;
+  high_delivery_days_20d: number | null;
+  delivery_source_date: string | null;
+  risk_score: number | null;
+  risk_level: 'Low' | 'Watch' | 'High' | null;
+  risk_flags: string | null;
+  fno_ban: boolean | null;
+  opportunity_score: number | null;
+  sast_events_180d: number | null;
+  sast_acquisitions: number | null;
+  sast_disposals: number | null;
+  sast_net_shares: number | null;
+  sast_promoter_buying: boolean | null;
+  sast_promoter_selling: boolean | null;
+  sast_latest_holder: string | null;
+  sast_latest_action: string | null;
+  sast_latest_stake: number | null;
+  sast_latest_date: string | null;
   turnover_median: number | null;
   trades_median: number | null;
   sessions: number | null;
@@ -101,6 +136,45 @@ export interface ExcludedStock {
   sessions: number | null;
 }
 
+export interface InvestorPosition {
+  symbol: string;
+  action: string;
+  events: number;
+  stake: number | null;
+  when: string | null;
+  source: string;
+}
+
+export interface Investor {
+  name: string;
+  /** promoter | institution | intermediary | investor */
+  kind: string;
+  stocks: number;
+  events: number;
+  buys: number;
+  sells: number;
+  latest_symbol: string;
+  latest_action: string;
+  latest_date: string | null;
+  sources: string[];
+  positions: InvestorPosition[];
+}
+
+export interface InvestorHolding {
+  symbol: string;
+  pct: number | null;
+  shares: number | null;
+}
+
+export interface InvestorPortfolio {
+  name: string;
+  kind: string;
+  stocks: number;
+  as_of: string | null;
+  largest_stake: number;
+  holdings: InvestorHolding[];
+}
+
 export interface Screen {
   generated_at: string;
   last_trading_session: string;
@@ -122,9 +196,50 @@ export interface Screen {
   news_source: string;
   news_window_days: number;
   news_rows: number | null;
+  news_nse_rows?: number | null;
+  news_bse_rows?: number | null;
   news_symbols: number;
   news_status: string;
   news_error?: string;
+  deal_source?: string;
+  deal_status?: string;
+  deal_rows?: number | null;
+  deal_symbols?: number;
+  deal_as_on?: string | null;
+  delivery_source?: string;
+  delivery_status?: string;
+  delivery_rows?: number | null;
+  delivery_symbols?: number;
+  delivery_window_sessions?: number;
+  risk_source?: string;
+  risk_status?: string;
+  risk_error?: string;
+  fo_ban_count?: number;
+  high_risk_symbols?: number;
+  ca_status?: string;
+  ca_symbols?: number;
+  ca_events?: number;
+  ca_examples?: string[];
+  ownership_status?: string;
+  ownership_symbols?: number;
+  ownership_rows?: number;
+  fii_net_cr?: number;
+  dii_net_cr?: number;
+  fii_dii_status?: string;
+  macro_status?: string;
+  market_regime?: string;
+  market_regime_summary?: string;
+  breadth_advancers?: number;
+  breadth_decliners?: number;
+  breadth_traded?: number;
+  breadth_advance_pct?: number;
+  above_50dma_pct?: number;
+  above_200dma_pct?: number;
+  median_1m_return_pct?: number | null;
+  investors?: Investor[];
+  investor_holdings?: InvestorPortfolio[];
+  shp_symbols?: number;
+  disclosures_updated_at?: string;
   stocks: Stock[];
   excluded: ExcludedStock[];
 }
@@ -158,6 +273,25 @@ export interface SourceProbe {
   detail: string;
   ms: number;
   note: string;
+}
+
+export interface ChartPoint {
+  date: string;
+  close: number;
+  return_pct: number | null;
+  market_return_pct: number | null;
+  ma50: number | null;
+  ma200: number | null;
+  volume: number | null;
+  turnover: number | null;
+}
+
+export interface StockChartResponse {
+  symbol: string;
+  range: string;
+  source: string;
+  last_date: string | null;
+  points: ChartPoint[];
 }
 
 export const PILLARS = ['quality', 'growth', 'valuation', 'trend', 'momentum'] as const;
@@ -212,22 +346,28 @@ export function formatCrore(marketCap: number | null): string {
   return `₹${cr.toLocaleString('en-IN', { maximumFractionDigits: 0 })} cr`;
 }
 
+/**
+ * Score colours.
+ *
+ * These were 400-weight, chosen when the app was dark. On the current light surface
+ * text-success sits around 2:1 against white, well under the 4.5:1 WCAG AA minimum,
+ * so the most important numbers on the board were the hardest to read. Semantic tokens
+ * fix the contrast and follow the theme into dark mode.
+ */
 export function scoreColor(score: number | null): string {
-  if (score == null) return 'text-slate-500';
-  if (score >= 80) return 'text-emerald-400';
-  if (score >= 60) return 'text-teal-400';
-  if (score >= 40) return 'text-amber-400';
-  if (score >= 20) return 'text-orange-400';
-  return 'text-rose-400';
+  if (score == null) return 'text-muted-foreground';
+  if (score >= 80) return 'text-success';
+  if (score >= 60) return 'text-foreground';
+  if (score >= 40) return 'text-warning';
+  return 'text-danger';
 }
 
 export function scoreBg(score: number | null): string {
-  if (score == null) return 'bg-slate-700';
-  if (score >= 80) return 'bg-emerald-500';
-  if (score >= 60) return 'bg-teal-500';
-  if (score >= 40) return 'bg-amber-500';
-  if (score >= 20) return 'bg-orange-500';
-  return 'bg-rose-500';
+  if (score == null) return 'bg-muted';
+  if (score >= 80) return 'bg-success';
+  if (score >= 60) return 'bg-primary';
+  if (score >= 40) return 'bg-warning';
+  return 'bg-danger';
 }
 
 export function formatTurnover(v: number | null): string {
