@@ -1,0 +1,94 @@
+name: Intraday disclosures
+
+# SEBI SAST filings and bulk/block deals are published through the trading day, not once
+# at the close like the bhavcopy. Waiting for the evening run would leave the Investors
+# page up to a day stale on its most time-sensitive data.
+#
+# This job deliberately does NOT refetch prices: it reuses the cached bhavcopy and only
+# pulls disclosures, so it finishes in well under a minute and stays comfortably inside
+# the free tier even running several times a day.
+
+on:
+  schedule:
+    # 10:00, 12:30 and 15:30 IST on weekdays (04:30, 07:00 and 10:00 UTC).
+    - cron: "30 4,7,10 * * 1-5"
+  workflow_dispatch:
+
+concurrency:
+  # Must never overlap the evening full refresh, which rewrites the same files.
+  group: market-lab-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: pip install -r requirements.txt
+
+      - name: Restore market data cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/bhavcopy
+            data/cache
+            data/delivery
+            data/shareholding
+            data/*.pkl
+          key: market-data-${{ github.run_id }}
+          restore-keys: |
+            market-data-
+
+      # skip_fetch reuses cached prices; disclosures are still fetched live inside the
+      # pipeline, which is the whole point of this run.
+      - name: Refresh disclosures
+        run: |
+          python - <<'PY'
+          from marketlab import ownership, pipeline, universe as un
+          u = un.build("all").set_index("symbol")
+          _, meta = ownership.fetch_and_summarize(u.index)
+          print("disclosures:", meta)
+          out = pipeline.run(skip_fetch=True)
+          print("rebuilt", out["scored"], "stocks with", len(out.get("investors", [])), "filers")
+          PY
+
+      - name: Verify the bundle before deploying
+        run: python scripts/verify_static.py
+
+      - name: Build web app
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: refresh
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

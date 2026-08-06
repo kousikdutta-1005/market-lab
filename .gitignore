@@ -1,8 +1,19 @@
 .venv/
 data/cache/
+data/delivery/
 data/*.pkl
+
+# Cached shareholding XBRL, one pickle per company per quarter. Regenerable from NSE and
+# rebuilt incrementally by the crawler, so it is a cache rather than a record — and pickle
+# is the wrong format to archive in anyway.
+data/shareholding/
+data/shareholding_misses.json
 __pycache__/
 *.pyc
 .env
 web/node_modules/
 web/dist/
+
+# Generated static bundle: rebuilt by the pipeline/CI on every run. Committing it would
+# add ~30MB of churn per day to git history for data that is stale within 24 hours.
+web/public/data/

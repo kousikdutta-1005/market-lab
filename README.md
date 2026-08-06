@@ -35,6 +35,11 @@ Equities use Yahoo suffixes: `.NS` (NSE), `.BO` (BSE).
 | Equity / index OHLCV | Yahoo Finance chart API | none | delayed, unofficial |
 | Whole-market EOD prices | NSE bhavcopy (`nsearchives.nseindia.com`) | none | **primary price source** — one file per trading day covers every security |
 | Universe + size buckets | NSE index constituent CSVs + `EQUITY_L.csv` | none | official; SEBI-aligned large/mid/small/micro buckets |
+| Official corporate events | NSE corporate announcements + BSE announcements | none | 14-day NSE backbone plus bounded same-day BSE disclosures |
+| Large deals | NSE large-deal snapshot | none | bulk, block and short-deal activity, shown as evidence rather than direction |
+| Delivery participation | NSE `sec_bhavdata_full` | none | latest and 20-session delivery percentage/value context |
+| Risk lens | NSE F&O ban + local diagnostics | none | F&O ban, volatility, drawdown, liquidity and data-quality flags |
+| Market regime | Derived from NSE bhavcopy breadth | none | advancers/decliners, participation above 50/200 DMA and median 1-month return |
 | Fundamentals | Yahoo Finance statements | none | quarterly; 1,582 of 1,606 stocks have ROE |
 
 Responses are cached under `data/cache/` so repeated runs don't hammer public endpoints.
@@ -214,3 +219,79 @@ Personalised investment advice in India requires SEBI RIA/RA registration. Autom
 trades in *your own* account via a broker API is permitted, but retail algo rules
 tightened in 2025 — brokers require strategy registration above certain order-rate
 thresholds. Check your broker's algo policy before going anywhere near execution.
+
+## Publishing it for free
+
+The public site is **static files only**. There is no backend in production, which is the
+whole reason it can be free at any traffic level: serving a million visitors is a CDN
+problem, not a compute problem, and every major CDN gives that away.
+
+```
+pipeline.run()          # fetch, score, and write web/public/data/
+scripts/verify_static.py  # refuse to publish a broken bundle
+cd web && npm run build   # bundle the app + data into web/dist/
+```
+
+`web/dist/` is then the entire website. Upload it anywhere.
+
+### What gets written
+
+| File | Purpose |
+| --- | --- |
+| `data/screen.json` | The whole board, columnar (repeated JSON keys stripped) |
+| `data/calendar.json` | Shared trading-day axis + the equal-weighted market line |
+| `data/charts/SYMBOL.json` | Per-symbol history, fetched only when a stock is opened |
+| `data/sources.json` | Source health recorded at build time |
+| `data/manifest.json` | SHA-256 of every published file, plus the git commit |
+
+Columnar encoding and rounding to displayed precision cut the board from **519 KB to
+309 KB gzipped**, and per-symbol history from **19 KB to 9 KB**.
+
+### Hosting
+
+Any static host works. Cloudflare Pages is the recommendation purely because its free
+tier does not meter bandwidth or requests, so traffic growth cannot generate a bill.
+GitHub Pages also works and is wired up in `.github/workflows/daily-refresh.yml`, but its
+bandwidth is soft-capped around 100 GB/month — fine to launch on, not for a million daily
+users.
+
+`web/public/_headers` sets the cache policy Cloudflare/Netlify read: fingerprinted assets
+are immutable, data files are edge-cached for minutes-to-hours with
+`stale-while-revalidate`, and the HTML shell is never cached hard (otherwise visitors keep
+booting an old bundle that points at deleted asset filenames).
+
+### Staying current without a server
+
+`.github/workflows/daily-refresh.yml` runs at 13:45 UTC (19:15 IST) on weekdays, after
+NSE publishes the day's bhavcopy. It restores the accumulated bhavcopy archive from the
+Actions cache, refetches only the missing days, rescores, verifies, and deploys. If a run
+fails, the previously deployed site keeps serving — visitors get slightly older data
+rather than an outage.
+
+### The AI assistant costs nothing to run
+
+The assistant calls Google directly from the visitor's browser using **their own** free
+Gemini key, stored only in their `localStorage`. This is the one feature with a real
+per-request cost, and routing it through a shared server key is what would eventually
+force a paywall. There is no key on the operator's side and no server in the data path.
+
+## Licence, and the honest limits of "uncopyable"
+
+The source is public and the published data is hash-verifiable, because a research tool
+nobody can audit is worth nothing. That transparency has a direct consequence worth
+stating plainly: **anyone can read the code and download the data.** No technical measure
+changes that for a public website, and obfuscation would only destroy the auditability
+that is the point of the project.
+
+What actually protects the work is not secrecy:
+
+1. **The archive.** Delivery percentages, F&O bans, bulk/block deals and announcements are
+   snapshotted daily. The exchanges do not sell that history back. A copy started today
+   gets today onward and can never reconstruct the accumulated point-in-time record — and
+   the gap widens every single day.
+2. **The licence.** `LICENSE` is PolyForm Shield 1.0.0: read it, run it, modify it, learn
+   from it — but you may not use it to build a competing product. Fully source-available,
+   not a free pass to clone commercially.
+3. **Provenance.** `data/manifest.json` records a SHA-256 for every published file
+   alongside the git commit that produced it, so an authentic build can be verified and a
+   scraped copy cannot credibly claim to be the same thing.

@@ -1,0 +1,105 @@
+name: Daily refresh
+
+# Rebuilds the public site from official exchange data after every trading session.
+#
+# This is what makes the tool self-maintaining: there is no server to keep alive, so the
+# only moving part is this scheduled job. It fetches, scores, exports static files and
+# deploys them. If it fails, the previously deployed site keeps serving — visitors see
+# slightly older data rather than an outage.
+
+on:
+  schedule:
+    # 19:15 IST = 13:45 UTC. NSE publishes the day's bhavcopy from ~18:30 IST, so this
+    # leaves margin without leaving the board stale all evening. Weekdays only.
+    - cron: "45 13 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      skip_fetch:
+        description: "Rebuild from cache only (no network fetch)"
+        type: boolean
+        default: false
+
+concurrency:
+  # A slow fetch must never overlap the next run and double up on NSE.
+  group: market-lab-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      # The bhavcopy archive is the expensive part: one file per trading day, and it only
+      # ever grows. Restoring it turns a ~500-request cold start into a handful of new
+      # days. The key rotates per run so each run saves an updated archive, while
+      # restore-keys falls back to the most recent previous one.
+      - name: Restore market data cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/bhavcopy
+            data/cache
+            data/delivery
+            data/shareholding
+            data/*.pkl
+          key: market-data-${{ github.run_id }}
+          restore-keys: |
+            market-data-
+
+      - name: Refresh market data and build static bundle
+        env:
+          SKIP_FETCH: ${{ inputs.skip_fetch }}
+        run: |
+          python - <<'PY'
+          import os
+          from marketlab import pipeline
+          skip = os.environ.get("SKIP_FETCH", "").lower() == "true"
+          meta = pipeline.run(skip_fetch=skip)
+          print("scored", meta["scored"], "session", meta["last_trading_session"])
+          PY
+
+      # Deploying a broken bundle is worse than deploying nothing: the old site would be
+      # replaced by one that fails in the browser. Verify before publishing.
+      - name: Verify the bundle before deploying
+        run: python scripts/verify_static.py
+
+      - name: Build web app
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
