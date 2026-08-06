@@ -12,7 +12,13 @@
  */
 import type { Screen, SourceProbe, Stock, StockChartResponse, ChartPoint } from '../types';
 
-export const API = import.meta.env.DEV ? 'http://localhost:8787' : '';
+/**
+ * Always same-origin. In dev, Vite proxies /api to the local pipeline backend, so this
+ * needs no absolute URL and no CORS. Pointing dev at http://localhost:8787 directly used
+ * to make every call cross-origin, and it broke outright whenever Vite moved to a
+ * different port than the backend's allowlist expected.
+ */
+export const API = '';
 const BASE = import.meta.env.BASE_URL || '/';
 const DATA = `${BASE.replace(/\/$/, '')}/data`;
 

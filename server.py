@@ -49,9 +49,13 @@ MARKET_CLOSE = dt.time(15, 30)
 BHAVCOPY_READY = dt.time(18, 30)
 
 app = FastAPI(title="market-lab")
+# Any loopback origin, because a Vite dev server takes whatever port is free and a fixed
+# list of three ports silently broke the app the moment one of them was already in use.
+# This process only ever binds localhost and only exists on a developer's machine, so
+# there is no wider origin to protect against.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5177", "http://localhost:5180"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$",
     allow_methods=["*"],
     allow_headers=["*"],
 )
