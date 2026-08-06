@@ -5,8 +5,8 @@ import { Caveats } from './Caveats';
 import LiveStatus from './LiveStatus';
 import { StockDetail } from './StockDetail';
 import { StockTable } from './StockTable';
-import type { Screen, SizeBucket, RatingBasis } from './types';
-import { BUCKETS, BUCKET_LABEL, BUCKET_HELP } from './types';
+import type { Screen, SizeBucket, RatingBasis, HorizonKey } from './types';
+import { BUCKETS, BUCKET_LABEL, BUCKET_HELP, HORIZONS } from './types';
 
 const API = import.meta.env.DEV ? 'http://localhost:8787' : '';
 
@@ -28,7 +28,14 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [buckets, setBuckets] = useState<Set<SizeBucket>>(new Set(BUCKETS));
   const [basis, setBasis] = useState<'all' | RatingBasis>('all');
+  const [horizon, setHorizon] = useState<HorizonKey>('medium');
+  const [minFit, setMinFit] = useState(0);
+  const [fundamentalFilter, setFundamentalFilter] = useState('all');
+  const [technicalFilter, setTechnicalFilter] = useState('all');
+  const [newsFilter, setNewsFilter] = useState('all');
+  const [liquidityFloor, setLiquidityFloor] = useState(0);
   const [showExcluded, setShowExcluded] = useState(false);
+  const horizonMeta = HORIZONS.find((h) => h.key === horizon) ?? HORIZONS[1];
 
   const load = useCallback(async () => {
     try {
@@ -60,9 +67,20 @@ export default function App() {
     return screen.stocks.filter((s) => {
       if (s.bucket && !buckets.has(s.bucket)) return false;
       if (basis !== 'all' && s.rating_basis !== basis) return false;
+      const fit = s[horizonMeta.scoreKey] ?? 0;
+      if (fit < minFit) return false;
+      if (liquidityFloor > 0 && (s.turnover_median ?? 0) < liquidityFloor) return false;
+      if (fundamentalFilter === 'quality-growth' && ((s.quality ?? 0) < 60 || (s.growth ?? 0) < 60)) return false;
+      if (fundamentalFilter === 'quality-value' && ((s.quality ?? 0) < 60 || (s.valuation ?? 0) < 60)) return false;
+      if (fundamentalFilter === 'clean-balance-sheet' && ((s.quality ?? 0) < 60 || (s.debt_to_equity ?? 99) > 1.5)) return false;
+      if (technicalFilter === 'uptrend' && ((s.trend ?? 0) < 60 || (s.momentum ?? 0) < 50)) return false;
+      if (technicalFilter === 'momentum' && (s.momentum ?? 0) < 70) return false;
+      if (newsFilter === 'recent' && (s.news_count_14d ?? 0) === 0) return false;
+      if (newsFilter === 'constructive' && (s.news_event_score ?? 0) < 60) return false;
+      if (newsFilter === 'no-risk' && (s.news_negative_14d ?? 0) > 0) return false;
       return true;
     });
-  }, [screen, buckets, basis]);
+  }, [screen, buckets, basis, horizonMeta.scoreKey, minFit, liquidityFloor, fundamentalFilter, technicalFilter, newsFilter]);
 
   if (error && !screen) {
     return (
@@ -111,11 +129,15 @@ export default function App() {
             value={`${screen.scored.toLocaleString('en-IN')} scored of ${screen.universe_total.toLocaleString('en-IN')} listed`}
           />
           <Stat icon={CalendarDays} label="Last session" value={screen.last_trading_session} />
-          <Stat icon={Database} label="Price source" value={screen.source} />
+          <Stat
+            icon={Database}
+            label="Price layer"
+            value={screen.live_quote_status === 'available' ? `${screen.live_quote_source} · live` : 'NSE EOD bhavcopy'}
+          />
           <Stat
             icon={BarChart3}
-            label="Rating basis"
-            value={`${screen.rated_full} full · ${screen.rated_technical} technical-only`}
+            label="Official events"
+            value={`${screen.news_symbols.toLocaleString('en-IN')} symbols · ${screen.news_status}`}
           />
         </div>
 
@@ -180,10 +202,125 @@ export default function App() {
           </p>
         </section>
 
+        <section className="rounded-xl border border-teal-500/20 bg-teal-500/5 p-4">
+          <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-medium text-teal-100">
+                <BarChart3 className="size-4" />
+                Research fit, not a recommendation
+              </div>
+              <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-400">
+                Horizon scores combine fundamentals, technicals, liquidity and official NSE corporate
+                announcements. They rank what looks investable for a style and time horizon; they are
+                not a buy/sell call and they do not know your risk, cash needs or position size.
+              </p>
+            </div>
+
+            <div className="ml-auto flex flex-wrap gap-1.5">
+              {HORIZONS.map((h) => (
+                <button
+                  key={h.key}
+                  onClick={() => setHorizon(h.key)}
+                  title={h.detail}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                    horizon === h.key
+                      ? 'bg-teal-600 text-white'
+                      : 'bg-slate-800/70 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {h.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <label className="space-y-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-500">Minimum fit</span>
+              <select
+                value={minFit}
+                onChange={(e) => setMinFit(Number(e.target.value))}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-300 outline-none focus:border-slate-500"
+              >
+                <option value={0}>Any score</option>
+                <option value={60}>60+</option>
+                <option value={75}>75+</option>
+                <option value={90}>90+</option>
+              </select>
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-500">Fundamentals</span>
+              <select
+                value={fundamentalFilter}
+                onChange={(e) => setFundamentalFilter(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-300 outline-none focus:border-slate-500"
+              >
+                <option value="all">Any</option>
+                <option value="quality-growth">Quality + growth 60+</option>
+                <option value="quality-value">Quality + value 60+</option>
+                <option value="clean-balance-sheet">Quality 60+ and D/E ≤ 1.5</option>
+              </select>
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-500">Technicals</span>
+              <select
+                value={technicalFilter}
+                onChange={(e) => setTechnicalFilter(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-300 outline-none focus:border-slate-500"
+              >
+                <option value="all">Any</option>
+                <option value="uptrend">Trend 60+ and momentum 50+</option>
+                <option value="momentum">Momentum 70+</option>
+              </select>
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-500">Official events</span>
+              <select
+                value={newsFilter}
+                onChange={(e) => setNewsFilter(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-300 outline-none focus:border-slate-500"
+              >
+                <option value="all">Any</option>
+                <option value="recent">Has NSE event in 14d</option>
+                <option value="constructive">Event score 60+</option>
+                <option value="no-risk">No risk event in 14d</option>
+              </select>
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-500">Liquidity</span>
+              <select
+                value={liquidityFloor}
+                onChange={(e) => setLiquidityFloor(Number(e.target.value))}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-300 outline-none focus:border-slate-500"
+              >
+                <option value={0}>Any tradeable</option>
+                <option value={10000000}>₹1 cr/day+</option>
+                <option value={100000000}>₹10 cr/day+</option>
+                <option value={1000000000}>₹100 cr/day+</option>
+              </select>
+            </label>
+          </div>
+
+          <p className="mt-3 border-t border-teal-500/15 pt-3 text-xs leading-relaxed text-slate-500">
+            Current ranking column: <span className="text-slate-300">{horizonMeta.label}</span> — {horizonMeta.detail}.
+            Pressing Refresh rebuilds prices, technicals, liquidity, official events and all horizon scores, then the board
+            reloads from the newly written JSON.
+            {screen.live_quote_status !== 'available' && (
+              <>
+                {' '}Live stock quotes are not overlaid right now: <span className="text-slate-400">{screen.live_quote_detail}</span>
+              </>
+            )}
+          </p>
+        </section>
+
         <Caveats />
 
         <div className={`grid gap-5 ${stock ? 'xl:grid-cols-[minmax(0,1fr)_minmax(540px,640px)]' : ''}`}>
-          <StockTable stocks={visible} selected={selected} onSelect={setSelected} />
+          <StockTable stocks={visible} selected={selected} onSelect={setSelected} rankingKey={horizonMeta.scoreKey} />
           {stock && <StockDetail stock={stock} screen={screen} onClose={() => setSelected(null)} />}
         </div>
 

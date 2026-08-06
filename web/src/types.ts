@@ -11,6 +11,20 @@ export interface Stock {
   band: string | null;
   rating_basis: RatingBasis | null;
   pillars_used: number | null;
+  investable_score: number | null;
+  best_horizon: HorizonKey | null;
+  short_fit: number | null;
+  medium_fit: number | null;
+  long_fit: number | null;
+  liquidity_score: number | null;
+  news_event_score: number | null;
+  news_count_14d: number | null;
+  news_positive_14d: number | null;
+  news_negative_14d: number | null;
+  news_neutral_14d: number | null;
+  news_last_date: string | null;
+  news_last_title: string | null;
+  news_last_url: string | null;
   turnover_median: number | null;
   trades_median: number | null;
   sessions: number | null;
@@ -45,6 +59,8 @@ export interface Stock {
 
 export type SizeBucket = 'large' | 'mid' | 'small' | 'micro' | 'nano';
 export type RatingBasis = 'fundamental + technical' | 'technical only' | 'not rated';
+export type HorizonKey = 'short' | 'medium' | 'long';
+export type HorizonScoreKey = 'short_fit' | 'medium_fit' | 'long_fit';
 
 export const BUCKETS: SizeBucket[] = ['large', 'mid', 'small', 'micro', 'nano'];
 
@@ -62,6 +78,18 @@ export const BUCKET_HELP: Record<SizeBucket, string> = {
   small: 'Nifty Smallcap 250 — ranks 251 to 500.',
   micro: 'Nifty Microcap 250 — ranks 501 to 750.',
   nano: 'Listed but in no index — below roughly rank 750. Thinly covered and thinly traded.',
+};
+
+export const HORIZONS: Array<{ key: HorizonKey; scoreKey: HorizonScoreKey; label: string; detail: string }> = [
+  { key: 'short', scoreKey: 'short_fit', label: '1-3m', detail: 'Momentum, trend, liquidity and official events' },
+  { key: 'medium', scoreKey: 'medium_fit', label: '6-12m', detail: 'Balanced fundamentals, technicals and events' },
+  { key: 'long', scoreKey: 'long_fit', label: '3-5y', detail: 'Quality, growth, valuation and liquidity' },
+];
+
+export const HORIZON_LABEL: Record<HorizonKey, string> = {
+  short: '1-3m',
+  medium: '6-12m',
+  long: '3-5y',
 };
 
 export interface ExcludedStock {
@@ -87,6 +115,16 @@ export interface Screen {
   elapsed_s: number;
   weights: Record<string, number>;
   metrics: Record<string, string[]>;
+  horizon_weights: Record<string, { label: string; weights: Record<string, number> }>;
+  live_quote_status: string;
+  live_quote_source: string | null;
+  live_quote_detail: string;
+  news_source: string;
+  news_window_days: number;
+  news_rows: number | null;
+  news_symbols: number;
+  news_status: string;
+  news_error?: string;
   stocks: Stock[];
   excluded: ExcludedStock[];
 }

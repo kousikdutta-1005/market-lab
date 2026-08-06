@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Search, TriangleAlert, LineChart } from 'lucide-react';
 import {
-  PILLARS, scoreBg, scoreColor, formatTurnover, BUCKET_LABEL,
-  type Pillar, type Stock,
+  PILLARS, scoreBg, scoreColor, formatTurnover, BUCKET_LABEL, HORIZONS, HORIZON_LABEL,
+  type HorizonScoreKey, type Pillar, type Stock,
 } from './types';
 
-type SortKey = 'composite' | Pillar | 'symbol' | 'turnover_median';
+type SortKey =
+  | 'investable_score'
+  | HorizonScoreKey
+  | 'composite'
+  | Pillar
+  | 'symbol'
+  | 'turnover_median'
+  | 'news_event_score'
+  | 'news_count_14d';
 
 /** 1,600 rows in the DOM makes every 5s re-render janky. Render a page at a time. */
 const PAGE = 100;
@@ -26,12 +34,14 @@ export function StockTable({
   stocks,
   selected,
   onSelect,
+  rankingKey,
 }: {
   stocks: Stock[];
   selected: string | null;
   onSelect: (t: string) => void;
+  rankingKey: HorizonScoreKey;
 }) {
-  const [sortKey, setSortKey] = useState<SortKey>('composite');
+  const [sortKey, setSortKey] = useState<SortKey>(rankingKey);
   const [desc, setDesc] = useState(true);
   const [query, setQuery] = useState('');
   const [sector, setSector] = useState('all');
@@ -41,6 +51,8 @@ export function StockTable({
     () => ['all', ...Array.from(new Set(stocks.map((s) => s.sector).filter(Boolean) as string[])).sort()],
     [stocks],
   );
+
+  const horizon = HORIZONS.find((h) => h.scoreKey === rankingKey) ?? HORIZONS[1];
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -60,6 +72,10 @@ export function StockTable({
   }, [stocks, query, sector, sortKey, desc]);
 
   useEffect(() => setLimit(PAGE), [query, sector, sortKey, desc, stocks]);
+  useEffect(() => {
+    setSortKey(rankingKey);
+    setDesc(true);
+  }, [rankingKey]);
 
   function toggle(k: SortKey) {
     if (k === sortKey) setDesc(!desc);
@@ -115,10 +131,13 @@ export function StockTable({
             <tr>
               <th className="px-3 py-2 text-left font-medium">#</th>
               <Th k="symbol">Stock</Th>
+              <Th k={rankingKey}>Fit {horizon.label}</Th>
+              <th className="px-3 py-2 text-left font-medium">Best</th>
               <Th k="composite">Composite</Th>
               <Th k="turnover_median" right>
                 Liquidity
               </Th>
+              <Th k="news_event_score">Events</Th>
               {PILLARS.map((p) => (
                 <Th key={p} k={p}>
                   {p}
@@ -166,6 +185,14 @@ export function StockTable({
                     </div>
                   </td>
                   <td className="px-3 py-2">
+                    <span className={`text-base font-semibold tabular-nums ${scoreColor(s[rankingKey])}`}>
+                      {s[rankingKey]?.toFixed(0) ?? '—'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-xs text-slate-400">
+                    {s.best_horizon ? HORIZON_LABEL[s.best_horizon] : '—'}
+                  </td>
+                  <td className="px-3 py-2">
                     <span className={`text-base font-semibold tabular-nums ${scoreColor(s.composite)}`}>
                       {s.composite?.toFixed(0) ?? '—'}
                     </span>
@@ -175,6 +202,27 @@ export function StockTable({
                     title="Median daily traded value over the last year, as reported by NSE."
                   >
                     {formatTurnover(s.turnover_median)}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-semibold tabular-nums ${scoreColor(s.news_event_score)}`}>
+                        {s.news_event_score?.toFixed(0) ?? '—'}
+                      </span>
+                      {(s.news_count_14d ?? 0) > 0 && (
+                        <span
+                          title={s.news_last_title ?? undefined}
+                          className={`rounded px-1.5 py-0.5 text-[10px] ${
+                            (s.news_negative_14d ?? 0) > 0
+                              ? 'bg-rose-500/10 text-rose-300'
+                              : (s.news_positive_14d ?? 0) > 0
+                                ? 'bg-emerald-500/10 text-emerald-300'
+                                : 'bg-slate-800 text-slate-500'
+                          }`}
+                        >
+                          {s.news_count_14d} evt
+                        </span>
+                      )}
+                    </div>
                   </td>
                   {PILLARS.map((p) => (
                     <td key={p} className="px-3 py-2">

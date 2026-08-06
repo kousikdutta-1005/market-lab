@@ -18,6 +18,8 @@ import {
   BASIS_HELP,
   BUCKET_LABEL,
   METRIC_LABELS,
+  HORIZONS,
+  HORIZON_LABEL,
   PILLARS,
   PILLAR_HELP,
   formatCrore,
@@ -282,6 +284,68 @@ export function StockDetail({
             </ul>
           </div>
         )}
+
+        <Section icon={Gauge} title="Research fit by horizon" subtitle="Weighted research rankings, not personal advice or a buy/sell call.">
+          <div className="grid gap-2 sm:grid-cols-3">
+            {HORIZONS.map((h) => (
+              <div
+                key={h.key}
+                className={`rounded-lg border p-3 ${
+                  stock.best_horizon === h.key
+                    ? 'border-teal-500/40 bg-teal-500/10'
+                    : 'border-slate-800 bg-slate-900/40'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] uppercase tracking-wide text-slate-500">{h.label}</div>
+                  {stock.best_horizon === h.key && (
+                    <span className="rounded bg-teal-500/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-teal-200">
+                      best fit
+                    </span>
+                  )}
+                </div>
+                <div className={`mt-1 text-2xl font-semibold tabular-nums ${scoreColor(stock[h.scoreKey])}`}>
+                  {stock[h.scoreKey]?.toFixed(0) ?? '—'}
+                </div>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">{h.detail}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs leading-relaxed text-slate-500">
+            Best horizon: <span className="text-slate-300">{stock.best_horizon ? HORIZON_LABEL[stock.best_horizon] : '—'}</span>.
+            The score combines fundamentals, technicals, liquidity and official NSE events.
+          </p>
+        </Section>
+
+        <Section icon={CalendarDays} title="Official events / news" subtitle="NSE corporate announcements from the last 14 days.">
+          <div className="grid gap-2 sm:grid-cols-4">
+            <MiniStat label="Event score" value={stock.news_event_score?.toFixed(0) ?? '—'} />
+            <MiniStat label="Events" value={formatValue(stock.news_count_14d, 'integer')} />
+            <MiniStat label="Constructive" value={formatValue(stock.news_positive_14d, 'integer')} />
+            <MiniStat label="Risk flags" value={formatValue(stock.news_negative_14d, 'integer')} />
+          </div>
+          {stock.news_last_title ? (
+            <div className="mt-3 rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+              <div className="text-[11px] uppercase tracking-wide text-slate-500">Latest announcement</div>
+              <p className="mt-1 text-sm text-slate-200">{stock.news_last_title}</p>
+              <p className="mt-1 text-xs text-slate-500">{stock.news_last_date ?? ''}</p>
+              {stock.news_last_url && (
+                <a
+                  href={stock.news_last_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 inline-block text-xs text-teal-300 hover:text-teal-200"
+                >
+                  Open NSE attachment
+                </a>
+              )}
+            </div>
+          ) : (
+            <p className="mt-3 text-xs leading-relaxed text-slate-500">
+              No official NSE announcement was found for this stock in the current event window.
+            </p>
+          )}
+        </Section>
 
         <Section icon={Building2} title="Company facts" subtitle="Screener-style quick snapshot from the current cached public data.">
           <MetricGrid

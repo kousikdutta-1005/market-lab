@@ -168,3 +168,25 @@ test('excluded stocks are disclosed with reasons', async ({ page }) => {
   await expect(row).toBeVisible();
   await expect(row).toContainText(/turnover|history|price|zero|stale/i);
 });
+
+test('horizon research-fit filters rank the board', async ({ page }) => {
+  await page.goto(BASE);
+  const panel = page.locator('section', { hasText: 'Research fit, not a recommendation' });
+  await expect(panel).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Fit 6-12m' })).toBeVisible();
+
+  const shown = page.getByText(/^[\d,]+ shown$/);
+  const before = Number((await shown.innerText()).replace(/[^\d]/g, ''));
+
+  await panel.getByRole('button', { name: '3-5y' }).click();
+  await expect(page.getByRole('button', { name: 'Fit 3-5y' })).toBeVisible();
+
+  await panel.locator('select').nth(0).selectOption('90');
+  const afterMin = Number((await shown.innerText()).replace(/[^\d]/g, ''));
+  expect(afterMin).toBeLessThan(before);
+
+  await panel.locator('select').nth(3).selectOption('recent');
+  const afterNews = Number((await shown.innerText()).replace(/[^\d]/g, ''));
+  expect(afterNews).toBeLessThanOrEqual(afterMin);
+  await expect(page.locator('tbody tr').first()).toBeVisible();
+});

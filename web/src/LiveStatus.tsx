@@ -160,21 +160,25 @@ export default function LiveStatus({ onDataChanged }: Props) {
               <li>
                 <span className="text-slate-300">Prices</span> — NSE publishes one bhavcopy per
                 trading day, around {market?.new_data_expected ?? '18:30 IST'}. There is no new
-                closing data before then, whatever the refresh button does.
+                official closing data before then, whatever the refresh button does.
               </li>
               <li>
                 <span className="text-slate-300">Fundamentals</span> — change when companies file
                 results, so roughly quarterly.
               </li>
               <li>
-                <span className="text-slate-300">Scores</span> — recomputed whenever either of the
-                above moves.
+                <span className="text-slate-300">Official events/news</span> — NSE corporate
+                announcements are fetched on refresh and included in the horizon scores.
+              </li>
+              <li>
+                <span className="text-slate-300">Scores</span> — fundamentals, technicals,
+                liquidity, event scores and horizon rankings are all recomputed on refresh.
               </li>
             </ul>
             <p>
-              Polling an exchange every few seconds would return identical bytes while looking
-              busy. It also gets you blocked: Yahoo rate-limited this machine across every endpoint
-              earlier today for far gentler use than that.
+              Live stock quotes are a separate layer. If a quote endpoint is reachable, it can be
+              overlaid; right now the free whole-market quote endpoints are blocked or unauthorized,
+              so the board uses NSE's EOD bhavcopy for stock prices and says so.
             </p>
             {job?.log && job.log.length > 0 && (
               <pre className="mt-2 max-h-40 overflow-auto rounded bg-slate-950/60 p-2 font-mono text-[11px] text-slate-400">
