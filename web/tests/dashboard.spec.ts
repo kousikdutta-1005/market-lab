@@ -51,11 +51,18 @@ test('selecting a stock opens an auditable breakdown', async ({ page }) => {
 
   const detail = page.locator('aside');
   await expect(detail).toBeVisible();
-  for (const pillar of ['Quality', 'Growth', 'Valuation', 'Trend', 'Momentum']) {
-    await expect(detail.getByRole('heading', { name: pillar })).toBeVisible();
+  for (const section of [
+    'Company facts',
+    'Valuation',
+    'Profitability and growth',
+    'Returns and technicals',
+    'Liquidity and position size',
+    'Scorecard',
+  ]) {
+    await expect(detail.getByRole('heading', { name: section })).toBeVisible();
   }
-  await expect(detail.getByText('Return on equity', { exact: true })).toBeVisible();
-  await expect(detail.getByText(/not what the share price will do next/)).toBeVisible();
+  await expect(detail.getByText('Return on equity', { exact: true }).first()).toBeVisible();
+  await expect(detail.getByText(/not what the share price will do next/).first()).toBeVisible();
 });
 
 test('search and sort work', async ({ page }) => {

@@ -90,7 +90,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-300">
-      <div className="mx-auto max-w-7xl space-y-5 p-6">
+      <div className="mx-auto max-w-[1600px] space-y-5 p-6">
         <header>
           <h1 className="flex items-center gap-2.5 text-2xl font-semibold text-slate-100">
             <BarChart3 className="size-6 text-teal-400" />
@@ -182,7 +182,7 @@ export default function App() {
 
         <Caveats />
 
-        <div className={`grid gap-5 ${stock ? 'lg:grid-cols-[1.6fr_1fr]' : ''}`}>
+        <div className={`grid gap-5 ${stock ? 'xl:grid-cols-[minmax(0,1fr)_minmax(540px,640px)]' : ''}`}>
           <StockTable stocks={visible} selected={selected} onSelect={setSelected} />
           {stock && <StockDetail stock={stock} screen={screen} onClose={() => setSelected(null)} />}
         </div>

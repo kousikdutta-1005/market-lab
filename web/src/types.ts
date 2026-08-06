@@ -24,6 +24,7 @@ export interface Stock {
   ann_vol: number | null;
   years_of_data: number | null;
   roe: number | null;
+  roa: number | null;
   operating_margin: number | null;
   net_margin: number | null;
   debt_to_equity: number | null;
@@ -32,6 +33,7 @@ export interface Stock {
   pe: number | null;
   pb: number | null;
   ev_ebitda: number | null;
+  dividend_yield: number | null;
   above_50dma: number | null;
   above_200dma: number | null;
   dist_52w_high: number | null;
@@ -133,6 +135,7 @@ export const PILLAR_HELP: Record<Pillar, string> = {
 
 export const METRIC_LABELS: Record<string, string> = {
   roe: 'Return on equity',
+  roa: 'Return on assets',
   operating_margin: 'Operating margin',
   net_margin: 'Net margin',
   debt_to_equity: 'Debt / equity',
@@ -141,6 +144,7 @@ export const METRIC_LABELS: Record<string, string> = {
   pe: 'P / E',
   pb: 'P / B',
   ev_ebitda: 'EV / EBITDA',
+  dividend_yield: 'Dividend yield',
   above_50dma: 'vs 50-day avg',
   above_200dma: 'vs 200-day avg',
   dist_52w_high: 'From 52w high',
@@ -150,7 +154,7 @@ export const METRIC_LABELS: Record<string, string> = {
 };
 
 const PERCENT_METRICS = new Set([
-  'roe', 'operating_margin', 'net_margin', 'revenue_cagr', 'earnings_cagr',
+  'roe', 'roa', 'operating_margin', 'net_margin', 'revenue_cagr', 'earnings_cagr', 'dividend_yield',
   'above_50dma', 'above_200dma', 'dist_52w_high', 'rs_vs_nifty',
 ]);
 
