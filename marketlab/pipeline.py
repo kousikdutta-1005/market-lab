@@ -27,14 +27,24 @@ import pandas as pd
 import requests
 
 from . import bhavcopy as bc
-from . import news
-from . import bulk, liquidity as lq, rating, universe as un
+from . import corporate_actions as ca
+from . import deals, delivery, investors, macro, news, ownership, risk
+from . import shareholding as shp
+from . import liquidity as lq, rating, sources, static_export, universe as un
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 OUT = ROOT / "web" / "public"
 
 BENCH = "NIFTY 50"
+# New shareholding filings fetched per run. ~1,600 companies / 150 = about a fortnight
+# to cover the market, then it is pure cache until the next quarterly filings land.
+SHAREHOLDING_PER_RUN = 150
+# Wall-clock ceiling for that crawl. Nothing downstream waits on it, so a slow or
+# unresponsive NSE should cost the refresh a fixed amount of time rather than an
+# unbounded one — otherwise a background enrichment becomes the thing that hangs a
+# refresh someone is watching.
+SHAREHOLDING_BUDGET_S = 120.0
 HISTORY_DAYS = 730
 
 HORIZON_WEIGHTS = {
@@ -89,10 +99,38 @@ def refresh_prices(progress=None, on_log=print) -> dict[str, pd.DataFrame]:
     end = bc.latest_available() or dt.date.today()
     start = end - dt.timedelta(days=HISTORY_DAYS)
     on_log(f"prices: {start} .. {end}")
-    long = bc.fetch_range(start, end, workers=6, progress=progress, on_log=on_log)
+
+    required = ("close", "volume", "turnover", "trades")
+    cached = bc.load(prefix="nse", fields=required)
+    has_cache = all(k in cached and not cached[k].empty for k in required)
+    if has_cache:
+        cutoff = pd.Timestamp(start)
+        cached = {k: v[v.index >= cutoff].copy() for k, v in cached.items()}
+        latest_cached = max(v.index.max().date() for v in cached.values())
+        if latest_cached >= end:
+            on_log(f"  cached through {latest_cached}; no missing bhavcopy sessions")
+            return cached
+        fetch_start = latest_cached + dt.timedelta(days=1)
+    else:
+        fetch_start = start
+
+    long = bc.fetch_range(fetch_start, end, workers=6, progress=progress, on_log=on_log)
     if long.empty:
+        if has_cache:
+            on_log("  no new bhavcopy sessions; using cached matrices")
+            return cached
         raise RuntimeError("no bhavcopy data returned")
-    mats = bc.matrices(long)
+    fresh = bc.matrices(long)
+    if has_cache:
+        mats = {}
+        for field in required:
+            mats[field] = (
+                pd.concat([cached[field], fresh[field]])
+                .sort_index()
+                .loc[lambda x: ~x.index.duplicated(keep="last")]
+            )
+    else:
+        mats = fresh
     bc.save(mats, prefix="nse")
     return mats
 
@@ -280,7 +318,65 @@ def add_research_fit(df: pd.DataFrame, liq: pd.DataFrame, news_df: pd.DataFrame,
     return out
 
 
-def export(df: pd.DataFrame, liq: pd.DataFrame, meta: dict) -> Path:
+def add_product_signals(df: pd.DataFrame, liq: pd.DataFrame, last_session: dt.date, skip_fetch: bool, on_log=print) -> tuple[pd.DataFrame, dict]:
+    """Add free, refreshable evidence layers beyond fundamentals/technicals/news."""
+    meta: dict = {}
+    out = df.copy()
+
+    if skip_fetch and (DATA / "large_deal_summary.pkl").exists():
+        deal_df = pd.read_pickle(DATA / "large_deal_summary.pkl").reindex(out.index).fillna(0)
+        deal_meta = {
+            "deal_source": "NSE large-deal snapshot",
+            "deal_status": "cached",
+            "deal_rows": None,
+            "deal_symbols": int(deal_df["deal_count"].gt(0).sum()) if "deal_count" in deal_df else 0,
+            "deal_as_on": None,
+        }
+    else:
+        deal_df, deal_meta = deals.fetch_and_summarize(out.index)
+    out = out.join(deal_df, how="left")
+    deal_raw = np.log1p(pd.to_numeric(out.get("deal_value"), errors="coerce").fillna(0)) + 0.35 * np.log1p(
+        pd.to_numeric(out.get("deal_count"), errors="coerce").fillna(0)
+    )
+    out["deal_activity_score"] = _rank_within_bucket(deal_raw, out["bucket"]).where(out.get("deal_count", 0).fillna(0).gt(0), 0)
+    on_log(f"large deals: {deal_meta.get('deal_status')} ({deal_meta.get('deal_symbols')} symbols)")
+    meta.update(deal_meta)
+
+    if skip_fetch and (DATA / "delivery_summary.pkl").exists():
+        delivery_df = pd.read_pickle(DATA / "delivery_summary.pkl").reindex(out.index).fillna(0)
+        delivery_meta = {
+            "delivery_source": "NSE sec_bhavdata_full",
+            "delivery_status": "cached",
+            "delivery_rows": None,
+            "delivery_symbols": int(delivery_df["delivery_pct_median_20d"].gt(0).sum())
+            if "delivery_pct_median_20d" in delivery_df
+            else 0,
+            "delivery_window_sessions": 20,
+        }
+    else:
+        delivery_df, delivery_meta = delivery.fetch_and_summarize(out.index, end=last_session)
+    out = out.join(delivery_df, how="left")
+    delivery_rank = _rank_within_bucket(pd.to_numeric(out.get("delivery_pct_median_20d"), errors="coerce"), out["bucket"])
+    spike_rank = _rank_within_bucket(pd.to_numeric(out.get("delivery_spike"), errors="coerce"), out["bucket"])
+    out["delivery_accumulation_score"] = pd.concat([delivery_rank, spike_rank], axis=1).mean(axis=1)
+    on_log(f"delivery: {delivery_meta.get('delivery_status')} ({delivery_meta.get('delivery_symbols')} symbols)")
+    meta.update(delivery_meta)
+
+    risk_df, risk_meta = risk.build(out, liq)
+    out = out.join(risk_df, how="left")
+    risk_safe = 100 - pd.to_numeric(out.get("risk_score"), errors="coerce").fillna(0)
+    out["opportunity_score"] = (
+        0.62 * pd.to_numeric(out.get("investable_score"), errors="coerce")
+        + 0.18 * risk_safe
+        + 0.12 * pd.to_numeric(out.get("delivery_accumulation_score"), errors="coerce").fillna(50)
+        + 0.08 * pd.to_numeric(out.get("deal_activity_score"), errors="coerce").fillna(0)
+    ).clip(0, 100)
+    on_log(f"risk: {risk_meta.get('risk_status')} ({risk_meta.get('high_risk_symbols')} high-risk symbols)")
+    meta.update(risk_meta)
+    return out, meta
+
+
+def export(df: pd.DataFrame, liq: pd.DataFrame, meta: dict) -> dict:
     keep = [
         "name", "sector", "bucket", "price", "market_cap", "composite", "composite_raw",
         "band", "coverage",
@@ -289,6 +385,17 @@ def export(df: pd.DataFrame, liq: pd.DataFrame, meta: dict) -> Path:
         "liquidity_score",
         "news_event_score", "news_count_14d", "news_positive_14d", "news_negative_14d",
         "news_neutral_14d", "news_last_date", "news_last_title", "news_last_url",
+        "deal_activity_score", "deal_count", "bulk_deal_count", "block_deal_count",
+        "short_deal_count", "deal_value", "bulk_deal_value", "block_deal_value",
+        "deal_net_qty", "deal_latest_client", "deal_latest_type", "deal_latest_side",
+        "deal_latest_date",
+        "delivery_accumulation_score", "delivery_pct_latest", "delivery_pct_median_20d",
+        "delivery_value_median_20d", "delivery_spike", "high_delivery_days_20d",
+        "delivery_source_date",
+        "risk_score", "risk_level", "risk_flags", "fno_ban", "opportunity_score",
+        "sast_events_180d", "sast_acquisitions", "sast_disposals", "sast_net_shares",
+        "sast_promoter_buying", "sast_promoter_selling", "sast_latest_holder",
+        "sast_latest_action", "sast_latest_stake", "sast_latest_date",
         "quality", "growth", "valuation", "trend", "momentum",
         "roe", "roa", "operating_margin", "net_margin", "debt_to_equity",
         "revenue_cagr", "earnings_cagr", "pe", "pb", "ev_ebitda",
@@ -326,7 +433,7 @@ def export(df: pd.DataFrame, liq: pd.DataFrame, meta: dict) -> Path:
     OUT.mkdir(parents=True, exist_ok=True)
     p = OUT / "screen.json"
     p.write_text(json.dumps(payload, separators=(",", ":")))
-    return p
+    return payload
 
 
 def run(progress_cb=None, on_log=print, skip_fetch: bool = False) -> dict:
@@ -342,6 +449,12 @@ def run(progress_cb=None, on_log=print, skip_fetch: bool = False) -> dict:
     else:
         mats = refresh_prices(progress=progress_cb, on_log=on_log)
 
+    # Bhavcopy is a settlement record and never restates history, so a split or bonus
+    # shows up as a cliff in the price series. Adjust before anything reads these prices:
+    # returns, momentum, trend, volatility, drawdown and correlation are all wrong
+    # otherwise, and a 1:10 split reads as a -90% collapse.
+    mats, ca_meta = ca.adjust(mats, on_log=on_log)
+
     liq = build_liquidity(mats, u, on_log=on_log)
     df = build_scores(mats, u, liq, on_log=on_log)
 
@@ -350,7 +463,7 @@ def run(progress_cb=None, on_log=print, skip_fetch: bool = False) -> dict:
         on_log(f"news/events: {news_meta['news_status']} ({news_meta['news_symbols']} symbols)")
     else:
         try:
-            news_df, news_meta = news.fetch_and_summarize(df.index, days=14)
+            news_df, news_meta = news.fetch_and_summarize(df.index, days=14, universe=u)
             on_log(f"news/events: {news_meta['news_rows']} announcements, {news_meta['news_symbols']} symbols")
         except Exception as e:
             cached, news_meta = news.load_summary(df.index)
@@ -365,6 +478,27 @@ def run(progress_cb=None, on_log=print, skip_fetch: bool = False) -> dict:
     df = add_research_fit(df, liq, news_df, on_log=on_log)
 
     last_session = mats["close"].index[-1]
+    df, product_meta = add_product_signals(
+        df,
+        liq,
+        pd.Timestamp(last_session).date(),
+        skip_fetch=skip_fetch,
+        on_log=on_log,
+    )
+    if skip_fetch:
+        own_df, own_meta = ownership.load_summary(df.index)
+    else:
+        try:
+            own_df, own_meta = ownership.fetch_and_summarize(df.index)
+            own_meta.update(ownership.fetch_fii_dii())
+        except Exception as e:
+            own_df, own_meta = ownership.load_summary(df.index)
+            own_meta = {**own_meta, "ownership_status": f"failed: {type(e).__name__}"}
+    for col in own_df.columns:
+        df[col] = own_df[col].reindex(df.index)
+    on_log(f"large holders: {own_meta.get('ownership_status')} ({own_meta.get('ownership_symbols', 0)} symbols)")
+
+    macro_meta = macro.build(mats, u)
     meta = {
         "generated_at": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
         "last_trading_session": str(pd.Timestamp(last_session).date()),
@@ -384,7 +518,66 @@ def run(progress_cb=None, on_log=print, skip_fetch: bool = False) -> dict:
         "horizon_weights": HORIZON_WEIGHTS,
         **live_quote_status(),
         **news_meta,
+        **product_meta,
+        **macro_meta,
+        **own_meta,
+        **ca_meta,
     }
-    export(df, liq, meta)
+    try:
+        sast_raw = pd.read_pickle(ownership.CACHE) if ownership.CACHE.exists() else None
+        deal_raw = pd.read_pickle(DATA / "nse_large_deals.pkl") if (DATA / "nse_large_deals.pkl").exists() else None
+        investor_rows = investors.build(sast_raw, deal_raw)
+        if not skip_fetch:
+            # Fill the shareholding universe a slice at a time. NSE rate-limits, and this
+            # is enrichment rather than a blocking dependency, so a bounded budget per run
+            # covers the market over about a fortnight without ever hammering the source.
+            # Most-traded names go first so the best-known holders appear soonest.
+            order = (
+                liq[liq["scoreable"]]
+                .sort_values("turnover_median", ascending=False)
+                .index
+            )
+            try:
+                _, shp_meta = shp.refresh(
+                    order,
+                    limit=SHAREHOLDING_PER_RUN,
+                    on_log=on_log,
+                    budget_s=SHAREHOLDING_BUDGET_S,
+                )
+                meta.update(shp_meta)
+            except Exception as e:
+                on_log(f"shareholding: skipped ({type(e).__name__}: {e})")
+
+        meta["investors"] = investor_rows
+        held = shp.load()
+        meta["investor_holdings"] = investors.build_holdings(held)
+        meta["shp_symbols"] = int(held["symbol"].nunique()) if not held.empty else 0
+        meta["disclosures_updated_at"] = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+        on_log(f"investors: {len(investor_rows)} filers, {len(meta['investor_holdings'])} with holdings")
+    except Exception as e:
+        meta["investors"] = []
+        on_log(f"investors: failed ({type(e).__name__}: {e})")
+
+    payload = export(df, liq, meta)
+    try:
+        probes = None
+        if not skip_fetch:
+            # Only probe when this run was already allowed to hit the network. A cached
+            # run must not silently start making live calls.
+            try:
+                probes = sources.probe_all()
+                reachable = sum(1 for p in probes if p["ok"])
+                on_log(f"source health: {reachable}/{len(probes)} reachable")
+            except Exception as e:
+                on_log(f"source health: skipped ({type(e).__name__}: {e})")
+        static_meta = static_export.build(payload, mats, sources=probes)
+        on_log(
+            f"static bundle: {static_meta['charts']} chart files, "
+            f"screen.json {static_meta['screen_bytes'] // 1024} KB"
+        )
+    except Exception as e:
+        # The local app still works off web/public/screen.json, so a static-export failure
+        # must not fail the whole refresh — it only affects the next public deploy.
+        on_log(f"static bundle: failed ({type(e).__name__}: {e})")
     on_log(f"done in {meta['elapsed_s']}s -> {meta['scored']} scored")
     return meta

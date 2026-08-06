@@ -25,6 +25,8 @@ import datetime as dt
 import json
 import threading
 import time
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -33,6 +35,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from marketlab import bhavcopy as bc
+from marketlab import news
 from marketlab import pipeline
 
 ROOT = Path(__file__).resolve().parent
@@ -178,6 +181,65 @@ def screen():
     return FileResponse(p, media_type="application/json")
 
 
+@app.get("/api/chart/{symbol}")
+def chart(symbol: str, range: str = "1y") -> dict:
+    """Chart-ready price/volume series from the local NSE bhavcopy matrices."""
+    import pandas as pd
+
+    ranges = {"3m": 66, "6m": 126, "1y": 252, "2y": 504, "all": None}
+    if range not in ranges:
+        return JSONResponse({"error": f"unknown range {range!r}"}, status_code=400)
+
+    sym = symbol.upper().strip()
+    mats = bc.load(prefix="nse", fields=("close", "volume", "turnover"))
+    close = mats.get("close")
+    if close is None or close.empty or sym not in close.columns:
+        return JSONResponse({"error": f"{sym} not found in local bhavcopy cache"}, status_code=404)
+
+    px_full = pd.to_numeric(close[sym], errors="coerce").dropna()
+    if px_full.empty:
+        return JSONResponse({"error": f"{sym} has no price history"}, status_code=404)
+    n = ranges[range]
+    px = px_full.tail(n) if n else px_full
+    idx = px.index
+    base = float(px.iloc[0])
+
+    ma50 = px_full.rolling(50).mean().reindex(idx)
+    ma200 = px_full.rolling(200).mean().reindex(idx)
+    vol = mats.get("volume", pd.DataFrame()).get(sym, pd.Series(index=idx, dtype=float)).reindex(idx)
+    turnover = mats.get("turnover", pd.DataFrame()).get(sym, pd.Series(index=idx, dtype=float)).reindex(idx)
+
+    market = close.reindex(idx).ffill(limit=5)
+    market_norm = market.div(market.iloc[0]).replace([float("inf"), float("-inf")], pd.NA)
+    market_return = (market_norm.mean(axis=1) - 1) * 100
+
+    rows = []
+    for d in idx:
+        c = float(px.loc[d])
+        rows.append(
+            {
+                "date": str(pd.Timestamp(d).date()),
+                "close": round(c, 4),
+                "return_pct": round((c / base - 1) * 100, 4) if base else None,
+                "market_return_pct": None
+                if pd.isna(market_return.loc[d])
+                else round(float(market_return.loc[d]), 4),
+                "ma50": None if pd.isna(ma50.loc[d]) else round(float(ma50.loc[d]), 4),
+                "ma200": None if pd.isna(ma200.loc[d]) else round(float(ma200.loc[d]), 4),
+                "volume": None if pd.isna(vol.loc[d]) else int(vol.loc[d]),
+                "turnover": None if pd.isna(turnover.loc[d]) else round(float(turnover.loc[d]), 2),
+            }
+        )
+
+    return {
+        "symbol": sym,
+        "range": range,
+        "source": "NSE bhavcopy (exchange EOD)",
+        "last_date": rows[-1]["date"] if rows else None,
+        "points": rows,
+    }
+
+
 @app.get("/api/health")
 def health():
     p = PUBLIC / "health.json"
@@ -188,63 +250,89 @@ def health():
 
 @app.get("/api/sources")
 def sources() -> dict:
-    """Live connectivity probe of the sources the tool actually depends on."""
-    import requests
+    """Live connectivity probe of the sources the tool actually depends on.
 
-    out = []
+    Shares its implementation with the static build so the local view and the published
+    snapshot can never drift into describing different things.
+    """
+    from marketlab import sources as src
 
-    def probe(name: str, fn, note: str = ""):
-        t0 = time.time()
-        try:
-            ok, detail = fn()
-        except Exception as e:
-            ok, detail = False, f"{type(e).__name__}: {e}"
-        out.append(
-            {
-                "name": name,
-                "ok": bool(ok),
-                "detail": str(detail),
-                "ms": round((time.time() - t0) * 1000),
-                "note": note,
-            }
-        )
-
-    def nse_bhavcopy():
-        d = bc.latest_available(max_back=6)
-        return (d is not None), (f"latest session {d}" if d else "no recent file")
-
-    def nse_indices():
-        from marketlab import universe as un
-
-        n = len(un.index_members("nifty50"))
-        return n >= 45, f"{n} Nifty 50 constituents"
-
-    def nse_equity_list():
-        from marketlab import universe as un
-
-        n = len(un.all_listed())
-        return n > 1500, f"{n} listed securities"
-
-    def yahoo():
-        r = requests.get(
-            "https://query1.finance.yahoo.com/v8/finance/chart/RELIANCE.NS",
-            params={"range": "1d", "interval": "1d"},
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=20,
-        )
-        if r.status_code == 429:
-            return False, "rate limited (HTTP 429)"
-        return r.status_code == 200, f"HTTP {r.status_code}"
-
-    probe("NSE bhavcopy", nse_bhavcopy, "primary price source, EOD")
-    probe("NSE index lists", nse_indices, "universe + size buckets")
-    probe("NSE equity list", nse_equity_list, "tradeable series filter")
-    probe("Yahoo Finance", yahoo, "fundamentals only; optional")
-    return {"checked_at": dt.datetime.now().astimezone().isoformat(timespec="seconds"), "sources": out}
+    return {
+        "checked_at": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "sources": src.probe_all(),
+    }
 
 
 if DIST.exists():
     app.mount("/", StaticFiles(directory=str(DIST), html=True), name="dist")
+
+@app.post("/api/chat")
+async def chat_api(request: Request):
+    """Natural language AI agent that filters the table or returns charts."""
+    data = await request.json()
+    query = data.get("query", "")
+    
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return JSONResponse({"error": "Missing GEMINI_API_KEY. Please export it in your terminal before running ./run.sh"}, status_code=400)
+
+    system_prompt = """You are MarketLab AI, a financial assistant for the Indian stock market.
+You control a stock screener UI. The user is asking you a question or giving a command.
+You must respond with a JSON object containing:
+1. "response": Your natural language reply to the user. Keep it concise.
+2. "apply_formula": (Optional) A JavaScript boolean expression to filter the stock table.
+   Available variables: pe, pb, roe, roa, dividend_yield, market_cap, sector, bucket (string: 'large','mid','small','micro','nano'), risk_level (string), opportunity_score, composite, delivery_accumulation_score, news_event_score.
+   Example: "roe > 0.15 && bucket === 'large' && pe < 30"
+3. "show_charts": (Optional) A list of stock symbols to display charts for. Example: ["RELIANCE", "TCS"]. Use NSE symbols only (without -EQ).
+
+Only return valid JSON, no markdown formatting.
+"""
+
+    payload = {
+        "contents": [{"parts": [{"text": query}]}],
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "generationConfig": {
+            "response_mime_type": "application/json",
+        }
+    }
+
+    req = urllib.request.Request(
+        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}",
+        method="POST",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps(payload).encode("utf-8")
+    )
+
+    try:
+        with urllib.request.urlopen(req) as response:
+            result = json.loads(response.read().decode("utf-8"))
+            text_response = result["candidates"][0]["content"]["parts"][0]["text"]
+            ai_data = json.loads(text_response)
+    except urllib.error.HTTPError as e:
+        err_msg = e.read().decode("utf-8")
+        return JSONResponse({"error": f"API Error: {err_msg}"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    import pandas as pd
+    charts_data = []
+    if "show_charts" in ai_data and isinstance(ai_data["show_charts"], list):
+        mats = bc.load(prefix="nse", fields=("close",))
+        close = mats.get("close")
+        if close is not None:
+            for sym in ai_data["show_charts"]:
+                sym = sym.upper().strip()
+                if sym in close.columns:
+                    px = pd.to_numeric(close[sym], errors="coerce").dropna().tail(126) # 6m
+                    if not px.empty:
+                        pts = [{"date": str(pd.Timestamp(d).date()), "close": float(px.loc[d])} for d in px.index]
+                        charts_data.append({"symbol": sym, "points": pts})
+
+    return {
+        "response": ai_data.get("response", "Done."),
+        "apply_formula": ai_data.get("apply_formula"),
+        "charts": charts_data
+    }
 
 
 if __name__ == "__main__":
