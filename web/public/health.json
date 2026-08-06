@@ -1,5 +1,5 @@
 {
- "checked_at": "2026-08-05T19:34:41",
+ "checked_at": "2026-08-05T19:38:41",
  "up": 5,
  "total": 5,
  "sources": [
@@ -9,7 +9,7 @@
    "auth": "none",
    "status": "ok",
    "detail": "14,238 scheme rows",
-   "latency_ms": 221
+   "latency_ms": 147
   },
   {
    "name": "mfapi.in",
@@ -17,7 +17,7 @@
    "auth": "none",
    "status": "ok",
    "detail": "3,243 NAVs, latest 04-08-2026",
-   "latency_ms": 11172
+   "latency_ms": 9135
   },
   {
    "name": "Yahoo chart",
@@ -25,7 +25,7 @@
    "auth": "none",
    "status": "ok",
    "detail": "RELIANCE.NS @ 1280.0 INR",
-   "latency_ms": 191
+   "latency_ms": 197
   },
   {
    "name": "Yahoo statements",
@@ -33,7 +33,7 @@
    "auth": "none",
    "status": "ok",
    "detail": "5 annual periods, 77 line items",
-   "latency_ms": 1565
+   "latency_ms": 1586
   },
   {
    "name": "NSE archives",
@@ -41,7 +41,7 @@
    "auth": "none",
    "status": "ok",
    "detail": "200 constituents",
-   "latency_ms": 419
+   "latency_ms": 376
   }
  ]
 }

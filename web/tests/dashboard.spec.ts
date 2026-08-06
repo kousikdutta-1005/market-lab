@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const BASE = 'http://localhost:5177';
+const BASE = process.env.ML_BASE ?? 'http://localhost:5177';
 
 test.beforeEach(async ({ page }) => {
   page.on('pageerror', (e) => {

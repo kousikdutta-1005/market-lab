@@ -60,12 +60,20 @@ happened to pick; the distribution of *every* 3-year window is much harder to fo
 - **NAV is post-expense but pre-exit-load and pre-tax.** Real returns are lower.
 - **Direct vs Regular plans differ by ~1%/yr.** Compare like with like.
 
-## Web UI
+## Running it
 
 ```bash
-./.venv/bin/python build_screen.py     # regenerate web/public/screen.json
-cd web && npm install && npm run dev
+./run.sh              # serve the existing build and open the browser (works offline)
+./run.sh --refresh    # re-fetch market data, rebuild, then serve (needs internet)
+./run.sh --port 5180  # use a different port
 ```
+
+Verified fully offline: 200 rows render with **zero external network requests** at runtime.
+All market data is baked into static JSON at build time, so the app itself never calls out.
+
+Deliberately local-only — there is no deploy step and no public URL. Publishing stock
+ratings publicly in India edges toward regulated investment-advice territory; running it
+on your own machine for your own research does not.
 
 React 19 + Vite + Tailwind 4 + lucide-react + recharts. Sortable factor table across the
 Nifty 200, click any row for a full breakdown: pillar radar, every raw metric, and any data
