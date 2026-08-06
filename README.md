@@ -76,9 +76,16 @@ happened to pick; the distribution of *every* 3-year window is much harder to fo
 ./run.sh --port 9000  # use a different port
 ```
 
-Deliberately local-only — there is no deploy step and no public URL. Publishing stock
-ratings publicly in India edges toward regulated investment-advice territory; running it
-on your own machine for your own research does not.
+`run.sh` is the local path: it builds the UI and starts a small FastAPI process so the
+**Refresh** button can actually run the pipeline. The public site at
+`experiments.kousikdutta.com` is the same build with no backend at all.
+
+One thing to be deliberate about: publishing stock scores in India sits near
+SEBI's research-analyst rules. This is why the tool ranks *research fit* rather than
+issuing buy/sell calls, names no price targets, states its method and sources in full,
+and carries "for research and education only, not investment advice, not SEBI-registered"
+on every page. That framing is load-bearing, not decoration — do not let a future change
+turn a score into a recommendation.
 
 React 19 + Vite + Tailwind 4 + lucide-react + recharts, served by a small local FastAPI
 backend so the **Refresh** button in the UI can actually run the pipeline. Sortable factor
@@ -249,11 +256,16 @@ Columnar encoding and rounding to displayed precision cut the board from **519 K
 
 ### Hosting
 
-Any static host works. Cloudflare Pages is the recommendation purely because its free
-tier does not meter bandwidth or requests, so traffic growth cannot generate a bill.
-GitHub Pages also works and is wired up in `.github/workflows/daily-refresh.yml`, but its
-bandwidth is soft-capped around 100 GB/month — fine to launch on, not for a million daily
-users.
+Deployed to **Cloudflare Pages** at `experiments.kousikdutta.com`, because its free tier
+meters neither bandwidth nor requests, so traffic growth cannot generate a bill.
+
+GitHub Pages was the original target and is the wrong one. A first visit is about 660 KB
+gzipped — 286 KB of app, 374 KB of screen data — so the 100 GB/month soft cap works out
+at roughly 5,000 visitors a day. GitHub enforces it by taking the site down rather than
+by billing, which is the failure mode this project least wants.
+
+Deploying needs two repository secrets: `CLOUDFLARE_API_TOKEN` (scoped to
+*Cloudflare Pages: Edit*) and `CLOUDFLARE_ACCOUNT_ID`.
 
 `web/public/_headers` sets the cache policy Cloudflare/Netlify read: fingerprinted assets
 are immutable, data files are edge-cached for minutes-to-hours with
@@ -263,10 +275,15 @@ booting an old bundle that points at deleted asset filenames).
 ### Staying current without a server
 
 `.github/workflows/daily-refresh.yml` runs at 13:45 UTC (19:15 IST) on weekdays, after
-NSE publishes the day's bhavcopy. It restores the accumulated bhavcopy archive from the
-Actions cache, refetches only the missing days, rescores, verifies, and deploys. If a run
-fails, the previously deployed site keeps serving — visitors get slightly older data
-rather than an outage.
+NSE publishes the day's bhavcopy. It refetches only the missing days, rescores, verifies,
+deploys, and then **commits the new sessions back to this repository**. If a run fails,
+the previously deployed site keeps serving — visitors get slightly older data rather than
+an outage.
+
+The archive is committed rather than cached deliberately. `actions/cache` is evicted
+after seven days of no access, and NSE does not serve historical bhavcopy indefinitely,
+so a session that is not captured on the day is gone permanently. Everything else under
+`data/` is regenerable and stays in the cache, where eviction costs only time.
 
 ### The AI assistant costs nothing to run
 

@@ -34,7 +34,12 @@ from . import liquidity as lq, rating, sources, static_export, universe as un
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
-OUT = ROOT / "web" / "public"
+# The local app's row-of-objects payload. It lives outside web/public deliberately:
+# anything in there is copied verbatim into the deployed bundle, and this file is 3.9MB
+# that the public site never reads — it uses the columnar export under data/ instead.
+# Shipping it was 11% of every deploy for a fallback that can only fire when the real
+# bundle is already broken.
+OUT = ROOT / "data"
 
 BENCH = "NIFTY 50"
 # New shareholding filings fetched per run. ~1,600 companies / 150 = about a fortnight

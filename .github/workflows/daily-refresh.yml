@@ -25,9 +25,9 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  # write, because the bhavcopy archive is committed back after each run. NSE does not
+  # serve old sessions indefinitely, so a day that is not captured is gone for good.
+  contents: write
 
 jobs:
   build:
@@ -50,15 +50,16 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      # The bhavcopy archive is the expensive part: one file per trading day, and it only
-      # ever grows. Restoring it turns a ~500-request cold start into a handful of new
-      # days. The key rotates per run so each run saves an updated archive, while
-      # restore-keys falls back to the most recent previous one.
-      - name: Restore market data cache
+      # Everything here is regenerable from a source that is still live, so the cache is
+      # a speed optimisation and nothing more. The bhavcopy archive is deliberately NOT
+      # in this list: it is committed to the repository instead, because actions/cache is
+      # evicted after 7 days of no access and NSE will not sell you back a session you
+      # failed to capture. Relying on the cache for it meant the archive quietly stopped
+      # accumulating, which is the one thing in this project that cannot be rebuilt.
+      - name: Restore regenerable caches
         uses: actions/cache@v4
         with:
           path: |
-            data/bhavcopy
             data/cache
             data/delivery
             data/shareholding
@@ -90,16 +91,39 @@ jobs:
           npm ci
           npm run build
 
-      - uses: actions/upload-pages-artifact@v3
+      # Cloudflare Pages rather than GitHub Pages. A first visit is roughly 660KB
+      # gzipped, so GitHub's 100GB/month soft cap works out at about 5,000 visitors a
+      # day before it throttles — and it throttles by taking the site down, not by
+      # billing. Cloudflare serves static assets with no bandwidth or request limit on
+      # the free plan, which is the only way this stays free at the traffic it is built
+      # for.
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
         with:
-          path: web/dist
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy web/dist --project-name=market-lab --branch=main
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      # Last, so a failed build or deploy never commits an archive for a run that did not
+      # publish. Only the raw exchange files are committed; everything derived from them
+      # is rebuilt on demand and would just be churn.
+      - name: Commit new sessions to the archive
+        run: |
+          git config user.name  "market-lab bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/bhavcopy
+          if git diff --cached --quiet; then
+            echo "No new trading sessions to archive."
+            exit 0
+          fi
+          git commit -m "Archive market data through $(date -u +%Y-%m-%d)"
+          # Two scheduled jobs write to this branch, so a run can find it has moved on.
+          # Rebase and retry rather than failing a run that has already deployed.
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && \
+              git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "push attempt $attempt failed, retrying"
+            sleep 5
+          done
+          echo "Could not push the archive after 3 attempts." >&2
+          exit 1

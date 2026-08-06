@@ -52,10 +52,15 @@ function decode<T>(block: Columnar | undefined): T[] {
 }
 
 export async function loadScreen(): Promise<Screen> {
+  /**
+   * Static bundle first, local backend second. There used to be a third fallback to a
+   * raw screen.json at the site root, which meant shipping a 3.9MB copy of data the
+   * columnar bundle already carries — for a path that can only be reached when the
+   * bundle is broken, which the pre-deploy verification exists to prevent.
+   */
   const attempts = [
     `${DATA}/screen.json`,
     `${API}/api/screen`,
-    `${BASE}screen.json`,
   ];
   let lastError = 'no data source responded';
   for (const url of attempts) {

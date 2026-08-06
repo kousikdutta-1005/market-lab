@@ -40,6 +40,9 @@ from marketlab import pipeline
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / "web" / "public"
+# The pipeline's local payload is written outside web/public so it is never copied into
+# the deployed bundle. See marketlab.pipeline.OUT.
+LOCAL_DATA = ROOT / "data"
 DIST = ROOT / "web" / "dist"
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
@@ -116,7 +119,7 @@ def market_phase(now: dt.datetime | None = None) -> dict:
 
 
 def _screen_meta() -> dict:
-    p = PUBLIC / "screen.json"
+    p = LOCAL_DATA / "screen.json"
     if not p.exists():
         return {"exists": False}
     try:
@@ -179,7 +182,7 @@ def refresh(prices: bool = True) -> dict:
 
 @app.get("/api/screen")
 def screen():
-    p = PUBLIC / "screen.json"
+    p = LOCAL_DATA / "screen.json"
     if not p.exists():
         return JSONResponse({"error": "no screen.json; run a refresh"}, status_code=404)
     return FileResponse(p, media_type="application/json")
