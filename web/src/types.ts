@@ -1,12 +1,19 @@
 export interface Stock {
-  ticker: string;
+  symbol: string;
   name: string | null;
   sector: string | null;
+  bucket: SizeBucket | null;
   price: number | null;
   market_cap: number | null;
   composite: number | null;
+  composite_raw: number | null;
   coverage: number | null;
   band: string | null;
+  rating_basis: RatingBasis | null;
+  pillars_used: number | null;
+  turnover_median: number | null;
+  trades_median: number | null;
+  sessions: number | null;
   quality: number | null;
   growth: number | null;
   valuation: number | null;
@@ -34,15 +41,83 @@ export interface Stock {
   data_flags: string | null;
 }
 
+export type SizeBucket = 'large' | 'mid' | 'small' | 'micro' | 'nano';
+export type RatingBasis = 'fundamental + technical' | 'technical only' | 'not rated';
+
+export const BUCKETS: SizeBucket[] = ['large', 'mid', 'small', 'micro', 'nano'];
+
+export const BUCKET_LABEL: Record<SizeBucket, string> = {
+  large: 'Large',
+  mid: 'Mid',
+  small: 'Small',
+  micro: 'Micro',
+  nano: 'Nano',
+};
+
+export const BUCKET_HELP: Record<SizeBucket, string> = {
+  large: 'Nifty 100 — the 100 biggest listed companies.',
+  mid: 'Nifty Midcap 150 — ranks 101 to 250 by market cap.',
+  small: 'Nifty Smallcap 250 — ranks 251 to 500.',
+  micro: 'Nifty Microcap 250 — ranks 501 to 750.',
+  nano: 'Listed but in no index — below roughly rank 750. Thinly covered and thinly traded.',
+};
+
+export interface ExcludedStock {
+  symbol: string;
+  bucket: SizeBucket | null;
+  tradeable: boolean;
+  reasons: string[];
+  turnover_median: number | null;
+  sessions: number | null;
+}
+
 export interface Screen {
   generated_at: string;
-  as_of: string;
-  universe: string;
-  n_scored: number;
-  n_universe: number;
+  last_trading_session: string;
+  sessions: number;
+  universe_total: number;
+  tradeable: number;
+  scoreable: number;
+  scored: number;
+  rated_full: number;
+  rated_technical: number;
+  source: string;
+  elapsed_s: number;
   weights: Record<string, number>;
   metrics: Record<string, string[]>;
   stocks: Stock[];
+  excluded: ExcludedStock[];
+}
+
+export interface MarketPhase {
+  phase: string;
+  is_open: boolean;
+  now_ist: string;
+  new_data_expected: string | null;
+}
+
+export interface JobState {
+  running: boolean;
+  stage: string;
+  log: string[];
+  error: string | null;
+  elapsed_s: number | null;
+  result: Record<string, unknown> | null;
+}
+
+export interface Status {
+  market: MarketPhase;
+  data: Partial<Screen> & { exists: boolean; age_s?: number };
+  job: JobState;
+  server_time: string;
+}
+
+export interface SourceProbe {
+  name: string;
+  ok: boolean;
+  detail: string;
+  ms: number;
+  note: string;
 }
 
 export const PILLARS = ['quality', 'growth', 'valuation', 'trend', 'momentum'] as const;
@@ -96,7 +171,7 @@ export function formatCrore(marketCap: number | null): string {
 }
 
 export function scoreColor(score: number | null): string {
-  if (score === null) return 'text-slate-500';
+  if (score == null) return 'text-slate-500';
   if (score >= 80) return 'text-emerald-400';
   if (score >= 60) return 'text-teal-400';
   if (score >= 40) return 'text-amber-400';
@@ -105,10 +180,35 @@ export function scoreColor(score: number | null): string {
 }
 
 export function scoreBg(score: number | null): string {
-  if (score === null) return 'bg-slate-700';
+  if (score == null) return 'bg-slate-700';
   if (score >= 80) return 'bg-emerald-500';
   if (score >= 60) return 'bg-teal-500';
   if (score >= 40) return 'bg-amber-500';
   if (score >= 20) return 'bg-orange-500';
   return 'bg-rose-500';
 }
+
+export function formatTurnover(v: number | null): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—';
+  const cr = v / 1e7;
+  if (cr >= 1000) return `₹${(cr / 1000).toFixed(1)}k cr`;
+  if (cr >= 1) return `₹${cr.toFixed(1)} cr`;
+  return `₹${(v / 1e5).toFixed(1)} L`;
+}
+
+export function formatAge(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) return '—';
+  if (seconds < 60) return `${Math.round(seconds)}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
+  return `${Math.round(seconds / 86400)}d ago`;
+}
+
+export const BASIS_HELP: Record<RatingBasis, string> = {
+  'fundamental + technical':
+    'Scored on all five pillars: the accounts were available as well as the price history.',
+  'technical only':
+    'Scored on price behaviour alone — trend and momentum. No financial statements were available for this company, so nothing here reflects profitability, debt or valuation. Not comparable with a fundamental + technical score.',
+  'not rated':
+    'Too little data to score on more than one pillar. Shown so the gap is visible rather than silently dropped.',
+};

@@ -1,108 +1,90 @@
-import { useEffect, useState } from 'react';
-import { CheckCircle2, Plug, RefreshCw, XCircle } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { CheckCircle2, XCircle, Loader2, Plug, RotateCw } from 'lucide-react';
+import type { SourceProbe } from './types';
 
-interface Source {
-  name: string;
-  purpose: string;
-  auth: string;
-  status: 'ok' | 'down';
-  detail: string;
-  latency_ms: number;
-}
-
-interface Health {
-  checked_at: string;
-  up: number;
-  total: number;
-  sources: Source[];
-}
-
-function latencyTone(ms: number) {
-  if (ms < 1000) return 'text-slate-500';
-  if (ms < 5000) return 'text-amber-400';
-  return 'text-orange-400';
-}
+const API = import.meta.env.DEV ? 'http://localhost:8787' : '';
 
 export function ApiHealth() {
-  const [health, setHealth] = useState<Health | null>(null);
-  const [missing, setMissing] = useState(false);
+  const [probes, setProbes] = useState<SourceProbe[] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    fetch(`${import.meta.env.BASE_URL}health.json`)
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then(setHealth)
-      .catch(() => setMissing(true));
+  const check = useCallback(async () => {
+    setChecking(true);
+    try {
+      const r = await fetch(`${API}/api/sources`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(String(r.status));
+      const j = await r.json();
+      setProbes(j.sources);
+      setFailed(false);
+    } catch {
+      setFailed(true);
+    } finally {
+      setChecking(false);
+    }
   }, []);
 
-  if (missing) {
+  useEffect(() => {
+    check();
+  }, [check]);
+
+  if (failed) {
     return (
-      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-        <div className="flex items-center gap-2 text-sm text-slate-400">
-          <Plug className="size-4 text-slate-500" />
-          No health data yet — run{' '}
-          <code className="rounded bg-slate-800 px-1.5 py-0.5 text-xs">python check_health.py</code>
-        </div>
+      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-500">
+        <span className="flex items-center gap-2">
+          <Plug className="size-4" />
+          Source checks need the backend running. The screen below is served from disk and works
+          without it.
+        </span>
       </section>
     );
   }
 
-  if (!health) return null;
-
-  const allUp = health.up === health.total;
-  const stale = Date.now() - new Date(health.checked_at).getTime() > 6 * 3600 * 1000;
+  const ok = probes?.filter((p) => p.ok).length ?? 0;
+  const total = probes?.length ?? 0;
 
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-900/40">
-      <header className="flex flex-wrap items-center gap-3 border-b border-slate-800 px-4 py-3">
-        <Plug className={`size-4 ${allUp ? 'text-emerald-400' : 'text-rose-400'}`} />
-        <h2 className="text-sm font-medium text-slate-200">Data source connectivity</h2>
-        <span
-          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-            allUp ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'
-          }`}
+      <div className="flex items-center gap-3 border-b border-slate-800 p-4">
+        <Plug className="size-4 text-slate-500" />
+        <h2 className="text-sm font-medium text-slate-200">Data sources</h2>
+        <span className="text-xs text-slate-500">
+          {probes ? `${ok} of ${total} reachable` : 'checking…'}
+        </span>
+        <button
+          onClick={check}
+          disabled={checking}
+          className="ml-auto flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-400 transition hover:border-slate-600 hover:text-slate-200 disabled:opacity-50"
         >
-          {health.up}/{health.total} connected
-        </span>
-        <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-500">
-          <RefreshCw className={`size-3 ${stale ? 'text-amber-400' : ''}`} />
-          checked {new Date(health.checked_at).toLocaleString('en-IN')}
-          {stale && <span className="text-amber-400">· stale</span>}
-        </span>
-      </header>
+          <RotateCw className={`size-3 ${checking ? 'animate-spin' : ''}`} />
+          Re-check
+        </button>
+      </div>
 
       <div className="divide-y divide-slate-800/60">
-        {health.sources.map((s) => (
-          <div key={s.name} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
-            {s.status === 'ok' ? (
-              <CheckCircle2 className="size-4 shrink-0 text-emerald-400" />
+        {!probes && (
+          <div className="flex items-center gap-2 p-4 text-sm text-slate-500">
+            <Loader2 className="size-4 animate-spin" /> Probing endpoints…
+          </div>
+        )}
+        {probes?.map((p) => (
+          <div key={p.name} className="flex items-start gap-3 p-3">
+            {p.ok ? (
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400" />
             ) : (
-              <XCircle className="size-4 shrink-0 text-rose-400" />
+              <XCircle className="mt-0.5 size-4 shrink-0 text-rose-400" />
             )}
-            <span className="w-36 shrink-0 text-sm font-medium text-slate-200">{s.name}</span>
-            <span className="w-64 shrink-0 text-xs text-slate-500">{s.purpose}</span>
-            <span
-              className={`flex-1 min-w-40 truncate font-mono text-xs ${
-                s.status === 'ok' ? 'text-slate-400' : 'text-rose-300'
-              }`}
-              title={s.detail}
-            >
-              {s.detail}
-            </span>
-            <span className="rounded bg-slate-800/60 px-1.5 py-0.5 text-xs text-slate-500">
-              {s.auth === 'none' ? 'no key' : s.auth}
-            </span>
-            <span className={`w-16 text-right text-xs tabular-nums ${latencyTone(s.latency_ms)}`}>
-              {s.latency_ms}ms
-            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <span className="text-sm font-medium text-slate-200">{p.name}</span>
+                <span className="text-xs text-slate-500">{p.detail}</span>
+                <span className="ml-auto text-xs tabular-nums text-slate-600">{p.ms} ms</span>
+              </div>
+              <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{p.note}</p>
+            </div>
           </div>
         ))}
       </div>
-
-      <p className="border-t border-slate-800 px-4 py-2.5 text-xs leading-relaxed text-slate-500">
-        Each check validates response <em>shape</em>, not just HTTP status — a 200 returning an
-        error page or an empty series is reported as down. Every source is public and keyless; no
-        broker is connected and this tool cannot place orders.
-      </p>
     </section>
   );
 }

@@ -1,6 +1,6 @@
 # market-lab
 
-Read-only research toolkit for Indian mutual funds and equities.
+Read-only research toolkit for Indian mutual funds and the whole NSE-listed equity market.
 
 **No credentials. No broker connection. No order placement.** By design — this layer
 only reads public data. Execution is a separate decision, deliberately not built yet.
@@ -33,6 +33,9 @@ Equities use Yahoo suffixes: `.NS` (NSE), `.BO` (BSE).
 | MF universe + daily NAV | AMFI `portal.amfiindia.com/spages/NAVAll.txt` | none | official, ~17k schemes |
 | MF NAV history | `api.mfapi.in` | none | unofficial mirror of AMFI |
 | Equity / index OHLCV | Yahoo Finance chart API | none | delayed, unofficial |
+| Whole-market EOD prices | NSE bhavcopy (`nsearchives.nseindia.com`) | none | **primary price source** — one file per trading day covers every security |
+| Universe + size buckets | NSE index constituent CSVs + `EQUITY_L.csv` | none | official; SEBI-aligned large/mid/small/micro buckets |
+| Fundamentals | Yahoo Finance statements | none | quarterly; 1,582 of 1,606 stocks have ROE |
 
 Responses are cached under `data/cache/` so repeated runs don't hammer public endpoints.
 
@@ -63,21 +66,48 @@ happened to pick; the distribution of *every* 3-year window is much harder to fo
 ## Running it
 
 ```bash
-./run.sh              # serve the existing build and open the browser (works offline)
-./run.sh --refresh    # re-fetch market data, rebuild, then serve (needs internet)
-./run.sh --port 5180  # use a different port
+./run.sh              # build if needed, serve on :8787, open the browser
+./run.sh --refresh    # pull the latest bhavcopy and rescore first (needs internet)
+./run.sh --port 9000  # use a different port
 ```
-
-Verified fully offline: 200 rows render with **zero external network requests** at runtime.
-All market data is baked into static JSON at build time, so the app itself never calls out.
 
 Deliberately local-only — there is no deploy step and no public URL. Publishing stock
 ratings publicly in India edges toward regulated investment-advice territory; running it
 on your own machine for your own research does not.
 
-React 19 + Vite + Tailwind 4 + lucide-react + recharts. Sortable factor table across the
-Nifty 200, click any row for a full breakdown: pillar radar, every raw metric, and any data
-quality flags that caused a value to be suppressed.
+React 19 + Vite + Tailwind 4 + lucide-react + recharts, served by a small local FastAPI
+backend so the **Refresh** button in the UI can actually run the pipeline. Sortable factor
+table across the whole market, filterable by size bucket, with a liquidity column; click
+any row for a full breakdown: pillar radar, every raw metric, position-size impact, and any
+data quality flags that caused a value to be suppressed.
+
+### Coverage
+
+| | |
+|---|---|
+| Listed NSE stocks (EQ series) | 2,078 |
+| Pass the liquidity gate | 1,801 |
+| Have enough history to score | 1,606 |
+| Scored | 1,602 |
+
+The 470 excluded stocks are listed in the UI with the reason for each, rather than
+silently dropped.
+
+### Refresh and auto-update
+
+The board re-reads server state every 5 seconds and shows the true age of the data. The
+underlying data does **not** change that fast, and the UI says so plainly:
+
+| Layer | Actually changes |
+|---|---|
+| Prices | once per trading day, when NSE publishes the bhavcopy (~18:30 IST) |
+| Fundamentals | when companies file results — roughly quarterly |
+| Scores | only when one of the above moves |
+
+There is no intraday feed here. Yahoo rate-limits this kind of polling across every
+endpoint, and NSE's live quote API returns 403 without a browser session. A UI that polled
+an exchange every 5 seconds would return identical bytes while looking busy, so this one
+reports data age instead of implying it is live.
 
 The rating is a **percentile rank of measured characteristics**, not a call. Pillars:
 quality 30%, growth 20%, valuation 20%, trend 15%, momentum 15%. Those weights are
@@ -97,6 +127,11 @@ Real defects caught while building this, each of which would have silently corru
 | Operating profit exceeding revenue (IDEA: 125% margin) | exceptional items scored as operating strength; ranked #8 of 200 | suppress margins outside ±100%; stock fell to #79 |
 | `niftystocks` package universe stale | wrong on 11 of 50 Nifty 50 names, still listing HDFC (merged 2023) | fetch NSE's published constituent list live |
 | yfinance `info` missing ROE/FCF for Indian tickers | ~0% coverage on key quality metrics | compute from financial statements instead — ROE coverage went to 99% |
+| NSE ships `DUMMYINXGN` / `DUMMYTRVN` placeholder rows inside its own index CSVs | Nifty Total Market returned 752 "stocks", Microcap 250 returned 252 | filter `DUMMY*` symbols explicitly |
+| Liquidity gate conflated "tradeable" with "has enough history" | GROWW (₹513 cr/day) and LG Electronics India rejected as *illiquid* | split into separate `tradeable` and `scoreable` tests |
+| Composite averaged 5 pillar ranks for some stocks and 2 for others | averaging shrinks variance ~1/√n, so data-poor stocks took **100% of the top 100 and 100% of the bottom 50** | re-rank the composite within its comparability class |
+| Same effect across size buckets | nano caps took 64% of the top 100 *and* 68% of the bottom 100 off 56% of the universe | rank within (size bucket × rating basis); every bucket now lands in both tails at its universe share |
+| Export dropped columns absent from the frame | missing keys became `undefined` in JS, slipping past `!== null` guards and crashing the detail pane | always emit every key as explicit `null` |
 
 
 

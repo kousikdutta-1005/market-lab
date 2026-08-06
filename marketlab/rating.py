@@ -75,24 +75,45 @@ def technicals(daily_px: pd.DataFrame, benchmark: pd.Series, asof: pd.Timestamp 
     return df
 
 
-def _winsorised_pct_rank(s: pd.Series, higher_is_better: bool, lo=0.02, hi=0.98) -> pd.Series:
-    """Percentile rank with extremes clipped.
+def _winsorised_pct_rank(
+    s: pd.Series, higher_is_better: bool, groups: pd.Series | None = None, lo=0.02, hi=0.98
+) -> pd.Series:
+    """Percentile rank with extremes clipped, optionally computed within groups.
 
     Indian small/mid-caps throw absurd outliers (P/E of 4000 after a bad quarter).
     Clipping stops one bad print from dominating an entire pillar.
+
+    When `groups` is given, both the clipping and the ranking happen inside each group.
+    Across the full market that matters more than it looks: a nano-cap's P/E percentile
+    against Reliance's is not a comparison of anything. Size buckets differ
+    systematically in margin, leverage and rating, so a single market-wide rank mostly
+    measures company size and calls it quality.
     """
     v = pd.to_numeric(s, errors="coerce")
-    if v.notna().sum() < 3:
-        return pd.Series(np.nan, index=s.index)
-    v = v.clip(v.quantile(lo), v.quantile(hi))
-    r = v.rank(pct=True, na_option="keep")
-    return r if higher_is_better else 1 - r
+
+    def rank_one(x: pd.Series) -> pd.Series:
+        if x.notna().sum() < 3:
+            return pd.Series(np.nan, index=x.index)
+        c = x.clip(x.quantile(lo), x.quantile(hi))
+        r = c.rank(pct=True, na_option="keep")
+        return r if higher_is_better else 1 - r
+
+    if groups is None:
+        return rank_one(v)
+    g = groups.reindex(v.index)
+    return v.groupby(g, dropna=False, group_keys=False).apply(rank_one).reindex(v.index)
 
 
 def score(
-    combined: pd.DataFrame, pillars: dict | None = None, min_coverage: float = 0.5
+    combined: pd.DataFrame,
+    pillars: dict | None = None,
+    min_coverage: float = 0.5,
+    groups: pd.Series | None = None,
 ) -> pd.DataFrame:
-    """Composite percentile score. Requires >= min_coverage of metrics present."""
+    """Composite percentile score. Requires >= min_coverage of metrics present.
+
+    `groups` (e.g. size bucket) makes every rank peer-relative rather than market-wide.
+    """
     pillars = pillars or PILLARS
     out = pd.DataFrame(index=combined.index)
     present: dict[str, list[str]] = {}
@@ -102,7 +123,7 @@ def score(
         for metric, higher in metrics:
             if metric not in combined.columns:
                 continue
-            ranked = _winsorised_pct_rank(combined[metric], higher)
+            ranked = _winsorised_pct_rank(combined[metric], higher, groups=groups)
             if ranked.notna().sum() == 0:
                 continue
             out[f"_{metric}"] = ranked
@@ -121,7 +142,51 @@ def score(
 
     all_metric_cols = [f"_{m}" for ms in METRICS.values() for m, _ in ms if f"_{m}" in out.columns]
     out["coverage"] = out[all_metric_cols].notna().mean(axis=1)
-    out.loc[out["coverage"] < min_coverage, "composite"] = np.nan
+
+    # A score built only on price history is a different claim from one that also saw
+    # the accounts, and collapsing both into one number hides which you are looking at.
+    # Rather than discard every stock without fundamentals — which across the whole
+    # market would silently delete most of it — say plainly what each score rests on.
+    fundamental_pillars = ["quality", "growth", "valuation"]
+    technical_pillars = ["trend", "momentum"]
+    has_fundamental = out[fundamental_pillars].notna().any(axis=1)
+    n_pillars = out[list(METRICS)].notna().sum(axis=1)
+
+    out["pillars_used"] = n_pillars
+    out["rating_basis"] = np.where(has_fundamental, "fundamental + technical", "technical only")
+
+    # Require at least two pillars; a single pillar is one opinion wearing a composite's
+    # clothing. Fundamental-backed scores additionally need real metric coverage.
+    ok = n_pillars >= 2
+    ok &= np.where(has_fundamental, out["coverage"] >= min_coverage, True)
+    ok &= out[technical_pillars].notna().any(axis=1)
+    out.loc[~ok, "composite"] = np.nan
+    out.loc[~ok, "rating_basis"] = "not rated"
+
+    # A mean of 5 percentile ranks is arithmetically compressed toward 50 relative to a
+    # mean of 2 — averaging shrinks variance by roughly 1/sqrt(n). Sorting both kinds of
+    # score in one column therefore ranks stocks by how little data they had, not by how
+    # they look: measured on real output, technical-only names took 100% of the top 100
+    # AND 100% of the bottom 50 purely through this effect. Re-rank each score against
+    # others computed the same way, so a number always means "position among stocks
+    # judged on the same evidence".
+    #
+    # The same argument applies to size. Every pillar is already ranked within bucket, so
+    # a raw composite of 86 means "ahead of most nano caps" and 70 means "ahead of most
+    # large caps" — comparing those two numbers compares the *shape* of each bucket's
+    # distribution, not the companies. Measured: nano's raw spread is wider (std 12.9 vs
+    # 10.6), and it took 64% of the top 100 AND 68% of the bottom 100 off 56% of the
+    # universe. Over-representation at both ends at once is noise, not skill.
+    out["composite_raw"] = out["composite"]
+    comparability = out["rating_basis"].astype(str)
+    if groups is not None:
+        comparability = comparability + "|" + groups.reindex(out.index).astype(str)
+    out["composite"] = (
+        out.groupby(comparability)["composite_raw"]
+        .rank(pct=True)
+        .mul(100)
+        .where(out["composite_raw"].notna())
+    )
 
     out["band"] = pd.cut(
         out["composite"],
