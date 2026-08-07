@@ -267,6 +267,15 @@ by billing, which is the failure mode this project least wants.
 Deploying needs two repository secrets: `CLOUDFLARE_API_TOKEN` (scoped to
 *Cloudflare Pages: Edit*) and `CLOUDFLARE_ACCOUNT_ID`.
 
+The Pages project must be **Direct Upload**, not connected to this repository. A
+git-connected project builds the site on Cloudflare, and this site cannot be built from
+the repository alone — the board's data is produced by the Python pipeline and
+`web/public/data/` is gitignored, so a Cloudflare-side build yields an app shell with no
+data in it. GitHub Actions runs the pipeline, builds, verifies, and uploads the result.
+
+If a git-connected project already exists under this name, delete it before the first
+deploy: Cloudflare refuses direct uploads to a project it builds itself.
+
 `web/public/_headers` sets the cache policy Cloudflare/Netlify read: fingerprinted assets
 are immutable, data files are edge-cached for minutes-to-hours with
 `stale-while-revalidate`, and the HTML shell is never cached hard (otherwise visitors keep
