@@ -289,10 +289,19 @@ deploys, and then **commits the new sessions back to this repository**. If a run
 the previously deployed site keeps serving — visitors get slightly older data rather than
 an outage.
 
-The archive is committed rather than cached deliberately. `actions/cache` is evicted
+Two files are committed rather than cached, deliberately. `actions/cache` is evicted
 after seven days of no access, and NSE does not serve historical bhavcopy indefinitely,
-so a session that is not captured on the day is gone permanently. Everything else under
-`data/` is regenerable and stays in the cache, where eviction costs only time.
+so a session that is not captured on the day is gone permanently.
+
+`data/shareholders.parquet` is committed for a related reason. The shareholding crawler
+is intentionally slow — 150 companies per run against a universe of 1,600 — so a runner
+starting from an empty cache would take a fortnight to populate the Investors page, and
+might never converge if the cache is evicted first. The first CI run demonstrated it
+exactly: 84 filers and zero portfolios. Parquet keeps 52,000 holder rows in 1.1 MB, so
+the crawler resumes from a full table instead of from nothing.
+
+Everything else under `data/` is regenerable and stays in the cache, where eviction costs
+only time.
 
 ### The AI assistant costs nothing to run
 

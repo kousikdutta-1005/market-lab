@@ -1,2 +1,7 @@
 requests>=2.32
 pandas>=2.2
+# Explicit because the whole data archive is parquet — every bhavcopy session and the
+# shareholders store. pandas only reads it through an engine, and CI was resolving a
+# tree with no pyarrow in it: reads happened to work, but to_parquet would have failed
+# silently and the committed archive would never have updated.
+pyarrow>=17

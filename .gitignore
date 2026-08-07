@@ -8,6 +8,7 @@ data/*.pkl
 # is the wrong format to archive in anyway.
 data/shareholding/
 data/shareholding_misses.json
+data/shareholders.pkl
 
 # The local app's payload, rebuilt by every pipeline run. It used to sit in web/public
 # and be committed, which added ~4MB of churn per refresh for a file the public site

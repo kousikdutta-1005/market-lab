@@ -97,9 +97,9 @@ jobs:
         run: |
           git config user.name  "market-lab bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/bhavcopy
+          git add data/bhavcopy data/shareholders.parquet
           if git diff --cached --quiet; then
-            echo "No new trading sessions to archive."
+            echo "No new sessions or filings to archive."
             exit 0
           fi
           git commit -m "Archive market data through $(date -u +%Y-%m-%d)"

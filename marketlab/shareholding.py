@@ -37,6 +37,18 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 CACHE_DIR = DATA / "shareholding"
 HOLDERS = DATA / "shareholders.pkl"
+# The committed, durable copy of the same table.
+#
+# The per-company pickles under data/shareholding/ are a fetch cache: 15MB of a
+# version-fragile format that has no business in git. But they cannot simply be thrown
+# away either — a cold CI runner would crawl 150 companies per run against a universe of
+# 1,600 and take a fortnight to populate the Investors page, and actions/cache is evicted
+# after seven days of no access, so it might never converge at all. The first CI run
+# proved it: 84 filers and zero portfolios.
+#
+# Parquet is the right middle ground: one file, 1.1MB, columnar, stable across pandas
+# versions, and a lossless round-trip of the same frame.
+HOLDERS_PARQUET = DATA / "shareholders.parquet"
 MISSES = DATA / "shareholding_misses.json"
 
 # How long to leave a symbol alone after it returned nothing. Most misses are companies
@@ -337,8 +349,7 @@ def refresh(
     _save_misses(misses)
     combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     if not combined.empty:
-        HOLDERS.parent.mkdir(parents=True, exist_ok=True)
-        combined.to_pickle(HOLDERS)
+        _write_store(combined)
     detail = f"shareholding: {cached} cached, {fetched} fetched, {failed} unavailable"
     if skipped:
         detail += f", {skipped} backed off"
@@ -373,19 +384,52 @@ def rebuild_store(on_log=print) -> pd.DataFrame:
     if not frames:
         return pd.DataFrame()
     df = pd.concat(frames, ignore_index=True)
-    HOLDERS.parent.mkdir(parents=True, exist_ok=True)
-    df.to_pickle(HOLDERS)
+    _write_store(df)
     on_log(f"shareholding store: {df['symbol'].nunique()} companies, {len(df)} holder rows")
     return df
 
 
+def _write_store(df: pd.DataFrame) -> None:
+    """Write both copies: the local pickle and the committed parquet."""
+    HOLDERS.parent.mkdir(parents=True, exist_ok=True)
+    df.to_pickle(HOLDERS)
+    try:
+        df.to_parquet(HOLDERS_PARQUET, index=False, compression="zstd")
+    except Exception as e:
+        # Not fatal — the pickle still exists and the run can finish. But this file is
+        # what a cold CI runner loads, so failing quietly here would mean the Investors
+        # page silently emptying out in production. Say so.
+        print(f"warning: could not write {HOLDERS_PARQUET.name}: {type(e).__name__}: {e}")
+
+
 def load() -> pd.DataFrame:
-    """Consolidated holders, rebuilt from cache when the store is stale or missing."""
+    """Consolidated holders.
+
+    Prefers whichever copy covers the most companies. On a developer machine that is
+    usually the local pickle or the fetch cache; on a fresh CI runner, where the cache
+    starts empty, it is the committed parquet — which is the whole reason that file
+    exists.
+    """
     cached_files = len(list(CACHE_DIR.glob("*.pkl"))) if CACHE_DIR.exists() else 0
-    if HOLDERS.exists():
-        df = pd.read_pickle(HOLDERS)
-        # A store covering far fewer companies than the cache holds means it was written
-        # by a partial pass; trust the cache instead.
-        if not df.empty and df["symbol"].nunique() >= cached_files * 0.9:
-            return df
-    return rebuild_store(on_log=lambda *_: None)
+
+    best = pd.DataFrame()
+    for path, reader in ((HOLDERS, pd.read_pickle), (HOLDERS_PARQUET, pd.read_parquet)):
+        if not path.exists():
+            continue
+        try:
+            df = reader(path)
+        except Exception:
+            continue
+        if not df.empty and df["symbol"].nunique() > best_coverage(best):
+            best = df
+
+    # A store covering far fewer companies than the fetch cache holds was written by a
+    # partial pass, so the cache is the more complete source.
+    if best_coverage(best) >= cached_files * 0.9 and not best.empty:
+        return best
+    rebuilt = rebuild_store(on_log=lambda *_: None)
+    return rebuilt if best_coverage(rebuilt) >= best_coverage(best) else best
+
+
+def best_coverage(df: pd.DataFrame) -> int:
+    return 0 if df is None or df.empty else int(df["symbol"].nunique())
