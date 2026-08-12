@@ -231,12 +231,33 @@ def write_charts(mats: dict, symbols, out: Path, sessions: int = CHART_SESSIONS)
 
 
 def write_sources(sources: list[dict] | None, out: Path, checked_at: str | None = None) -> Path:
-    """Snapshot source health so the static site can show it without probing live."""
+    """Snapshot source health so the static site can show it without probing live.
+
+    A run that did not probe must leave the last known result alone. Overwriting it with
+    an empty list published "0 of 0 reachable", which a reader can only read as every
+    source being down — the opposite of what happened, on the one panel that exists to
+    show the data can be checked. Not probing is not the same as finding nothing.
+    """
     out.mkdir(parents=True, exist_ok=True)
     p = out / "sources.json"
+
+    if not sources:
+        if p.exists():
+            try:
+                prior = json.loads(p.read_text())
+                if prior.get("sources"):
+                    return p
+            except Exception:
+                pass
+        # Nothing probed and nothing to preserve: say so, rather than implying a result.
+        p.write_text(
+            json.dumps({"checked_at": None, "sources": []}, separators=(",", ":")),
+        )
+        return p
+
     p.write_text(
         json.dumps(
-            {"checked_at": checked_at, "sources": sources or []},
+            {"checked_at": checked_at, "sources": sources},
             separators=(",", ":"),
             allow_nan=False,
         )

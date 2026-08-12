@@ -60,7 +60,9 @@ export function ApiHealth() {
           <Plug className="size-4 text-muted-foreground" />
           <CardTitle className="text-sm">Data sources</CardTitle>
           <Badge variant="outline">
-            {probes ? `${ok} of ${total} reachable` : 'checking…'}
+            {/* "0 of 0 reachable" reads as everything being down. An empty snapshot means
+                this build did not probe, which is a different statement entirely. */}
+            {!probes ? 'checking…' : total === 0 ? 'not checked in this build' : `${ok} of ${total} reachable`}
           </Badge>
           {live && (
             <Button onClick={check} disabled={checking} variant="outline" size="sm" className="ml-auto">
