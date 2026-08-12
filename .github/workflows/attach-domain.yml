@@ -69,3 +69,48 @@ jobs:
           for x in d.get('result', []):
               print(' ', x.get('name'), '->', x.get('status'))
           "
+
+          # A domain sits at 'pending' until DNS points at the project. Cloudflare usually
+          # adds that record itself when the zone is on the same account; it did not here,
+          # so create it. This needs Zone:DNS:Edit, which a Pages-only token does not have
+          # — in that case say exactly what is missing rather than failing blankly.
+          echo "== DNS =="
+          zone="$(curl -sS "https://api.cloudflare.com/client/v4/zones?name=${DOMAIN#*.}" \
+            -H "Authorization: Bearer ${CF_TOKEN}" \
+            | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          if not d.get('success'):
+              print('NOPERM:' + '; '.join(e.get('message','') for e in d.get('errors', [])))
+          else:
+              r=d.get('result') or []
+              print(r[0]['id'] if r else 'NOZONE')
+          ")"
+
+          case "$zone" in
+            NOPERM:*)
+              echo "The token cannot read zones: ${zone#NOPERM:}"
+              echo "Add a CNAME by hand, or re-mint the token with Zone -> DNS -> Edit:"
+              echo "  ${DOMAIN}  CNAME  ${PROJECT}-4dk.pages.dev  (proxied)"
+              exit 0 ;;
+            NOZONE)
+              echo "No zone found for ${DOMAIN#*.} on this account." ; exit 0 ;;
+          esac
+
+          target="$(curl -sS "${api}/${PROJECT}" -H "Authorization: Bearer ${CF_TOKEN}" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['subdomain'])")"
+          echo "zone found; pointing ${DOMAIN} at ${target}"
+
+          curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/${zone}/dns_records" \
+            -H "Authorization: Bearer ${CF_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data "{\"type\":\"CNAME\",\"name\":\"${DOMAIN}\",\"content\":\"${target}\",\"proxied\":true}" \
+            | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          if d.get('success'):
+              print('created:', d['result']['name'], '->', d['result']['content'])
+          else:
+              msgs='; '.join(e.get('message','') for e in d.get('errors', []))
+              print('already there' if 'already exists' in msgs.lower() else 'failed: ' + msgs)
+          "
