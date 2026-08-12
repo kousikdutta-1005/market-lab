@@ -55,7 +55,7 @@ jobs:
               print('attached:', d['result'].get('name'), '| status:', d['result'].get('status'))
           else:
               msgs=[e.get('message','') for e in d.get('errors',[])]
-              if any('already exists' in m.lower() or 'duplicate' in m.lower() for m in msgs):
+              if any(k in m.lower() for m in msgs for k in ('already exists', 'already added', 'duplicate')):
                   print('already attached:', '; '.join(msgs))
               else:
                   print('failed:', '; '.join(msgs)); sys.exit(1)
