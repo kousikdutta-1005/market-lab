@@ -43,7 +43,7 @@ const VIEWS: {
   {
     name: 'Factsheet',
     open: async (p) => {
-      await p.locator('section', { hasText: 'Top ranked stocks' }).first().getByRole('button').first().click();
+      await p.locator('section', { hasText: 'Highest ranked on this screen' }).first().getByRole('button').first().click();
       await p.getByRole('heading', { name: 'Price, trend and participation' }).waitFor({ timeout: 20000 });
     },
   },

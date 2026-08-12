@@ -215,8 +215,9 @@ export const COLUMNS: Column[] = [
   },
 
   // Ranking
-  scoreCol('opportunity', 'Opportunity', 'opportunity_score', 'Ranking',
-    'Overall research-fit score blending every pillar, flow and risk signal.', 110),
+  scoreCol('opportunity', 'Research score', 'opportunity_score', 'Ranking',
+    'How well this company scores across every pillar, flow and risk signal, ranked against '
+    + 'comparable peers. A measurement of research interest, not a prediction or a recommendation.', 124),
   {
     id: 'fit',
     label: (ctx) => `Fit ${ctx.horizonLabel}`,
@@ -230,7 +231,7 @@ export const COLUMNS: Column[] = [
   },
   {
     id: 'best_horizon',
-    label: () => 'Best suited for',
+    label: () => 'Scores highest for',
     group: 'Ranking',
     width: 110,
     cell: (s) => (

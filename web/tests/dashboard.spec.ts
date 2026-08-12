@@ -229,15 +229,15 @@ test('horizon research-fit filters rank the board', async ({ page }) => {
   await expect(page.locator('tbody tr').first()).toBeVisible();
 });
 
-test('opportunity cards carry a full research case, not just a score', async ({ page }) => {
+test('ranked cards carry a full research case, not just a score', async ({ page }) => {
   await page.goto(BASE);
-  const deck = page.locator('section', { hasText: 'Top ranked stocks' }).first();
+  const deck = page.locator('section', { hasText: 'Highest ranked on this screen' }).first();
   await expect(deck).toBeVisible();
 
   const card = deck.getByRole('button').first();
   // A decision needs horizon, risk, tradeability and the argument against — a bare
   // score is a tip, which is exactly what this tool refuses to be.
-  await expect(card).toContainText(/Best suited for/);
+  await expect(card).toContainText(/Scores highest for/);
   await expect(card).toContainText(/risk/i);
   await expect(card).toContainText(/Avg daily turnover/);
   await expect(card).toContainText(/₹1L order impact/);
@@ -285,7 +285,7 @@ test('clicking an idea opens its factsheet from the Ideas tab', async ({ page })
   // Regression: with tabs added, selecting a stock set state but rendered nothing,
   // because the factsheet only existed inside the Explore tab.
   await page.goto(BASE);
-  const deck = page.locator('section', { hasText: 'Top ranked stocks' }).first();
+  const deck = page.locator('section', { hasText: 'Highest ranked on this screen' }).first();
   await deck.getByRole('button').first().click();
   await expect(page.getByRole('heading', { name: 'Price, trend and participation' })).toBeVisible({
     timeout: 15000,
@@ -312,7 +312,7 @@ test('mobile shows a bottom nav and a usable board', async ({ page }) => {
 
 test('factsheet panes keep every section reachable', async ({ page }) => {
   await page.goto(BASE);
-  await page.locator('section', { hasText: 'Top ranked stocks' }).first().getByRole('button').first().click();
+  await page.locator('section', { hasText: 'Highest ranked on this screen' }).first().getByRole('button').first().click();
   const detail = page.locator('aside');
   await expect(detail).toBeVisible();
 

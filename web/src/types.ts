@@ -49,6 +49,13 @@ export interface Stock {
   risk_level: 'Low' | 'Watch' | 'High' | null;
   risk_flags: string | null;
   fno_ban: boolean | null;
+  /**
+   * Surfaced as "research score". The field keeps its original name because it is written
+   * by the pipeline, exported in the payload and referenced by the AI query schema, and
+   * renaming it across all three buys nothing. The label matters because it is what a
+   * reader sees: "opportunity" implies something to act on, which this is not — it is a
+   * percentile rank against comparable peers.
+   */
   opportunity_score: number | null;
   sast_events_180d: number | null;
   sast_acquisitions: number | null;

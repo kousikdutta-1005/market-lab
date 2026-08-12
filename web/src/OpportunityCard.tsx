@@ -150,7 +150,7 @@ export function OpportunityCard({
 
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Stat
-              label="Best suited for"
+              label="Scores highest for"
               value={stock.best_horizon ? HORIZON_LABEL[stock.best_horizon] : '—'}
               hint={fit != null ? `fit ${fit.toFixed(0)}/100` : undefined}
             />
@@ -176,7 +176,7 @@ export function OpportunityCard({
           <div className="text-2xl font-semibold tabular-nums tracking-[-0.03em] text-foreground">
             {stock.opportunity_score?.toFixed(0) ?? '—'}
           </div>
-          <div className="text-[10px] text-muted-foreground">opportunity</div>
+          <div className="text-[10px] text-muted-foreground">research score</div>
           <ArrowRight className="mt-2 ml-auto size-4 text-muted-foreground" />
         </div>
       </div>

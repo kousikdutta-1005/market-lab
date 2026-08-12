@@ -276,7 +276,7 @@ export default function App() {
   }
 
   const stock = screen.stocks.find((s) => s.symbol === selected) ?? null;
-  const highConviction = visible.filter((s) => (s.opportunity_score ?? 0) >= 80 && s.risk_level !== 'High').length;  const filterPanels = (
+  const strongMatches = visible.filter((s) => (s.opportunity_score ?? 0) >= 80 && s.risk_level !== 'High').length;  const filterPanels = (
     <>
       <section>
       <Card>
@@ -566,15 +566,15 @@ export default function App() {
                   <div>
                     <CardTitle className="flex items-center gap-2 text-sm">
                       <TrendingUp className="size-4 text-primary" />
-                      Top ranked stocks
+                      Highest ranked on this screen
                     </CardTitle>
                     <CardDescription>
-                      Ranked by opportunity score for the {horizonMeta.label} horizon — each with the
+                      Ranked by research score for the {horizonMeta.label} horizon — each with the
                       argument for, the argument against, and what a real position would do.
                       Not recommendations.
                     </CardDescription>
                   </div>
-                  <div className="text-xs font-medium text-muted-foreground">{highConviction.toLocaleString('en-IN')} high-conviction matches</div>
+                  <div className="text-xs font-medium text-muted-foreground">{strongMatches.toLocaleString('en-IN')} score 80+ on low risk</div>
                 </CardHeader>
                 <div className="divide-y">
                   {opportunities.map((stockItem, i) => (
@@ -777,10 +777,19 @@ export default function App() {
             </section>
             )}
 
-            <footer className="pb-5 text-xs leading-relaxed text-muted-foreground">
-              Generated {new Date(screen.generated_at).toLocaleString('en-IN')} · {screen.source} · {screen.sessions} sessions.
-              Free layers include {screen.deal_source}, {screen.delivery_source}, {screen.news_source} and {screen.risk_source}.
-              For research and education only. Not investment advice, not SEBI-registered.
+            <footer className="space-y-2 pb-5 text-xs leading-relaxed text-muted-foreground">
+              <p>
+                Generated {new Date(screen.generated_at).toLocaleString('en-IN')} · {screen.source} · {screen.sessions} sessions.
+                Free layers include {screen.deal_source}, {screen.delivery_source}, {screen.news_source} and {screen.risk_source}.
+              </p>
+              {/* Its own line, not the tail of a sentence about build metadata. This is the
+                  most important sentence on the page and it was the easiest one to skip. */}
+              <p className="border-t pt-2 text-foreground">
+                For research and education only. Nothing here is investment advice, a
+                recommendation, or a solicitation to buy or sell any security. Scores rank
+                companies against their peers on published, measurable criteria — they are
+                not predictions. Not SEBI-registered. Do your own research.
+              </p>
             </footer>
           </div>
         </div>

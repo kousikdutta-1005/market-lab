@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 export type TabKey = 'discover' | 'screen' | 'investors' | 'portfolio' | 'trust';
 
 export const TABS: { key: TabKey; label: string; short: string; icon: typeof TrendingUp }[] = [
-  { key: 'discover', label: 'Top Stocks', short: 'Top', icon: TrendingUp },
+  { key: 'discover', label: 'Rankings', short: 'Ranks', icon: TrendingUp },
   { key: 'screen', label: 'Screener', short: 'Screen', icon: Filter },
   { key: 'investors', label: 'Investors', short: 'Investors', icon: Users },
   { key: 'portfolio', label: 'Portfolio', short: 'Portfolio', icon: Briefcase },

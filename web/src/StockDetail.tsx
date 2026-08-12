@@ -345,7 +345,7 @@ export function StockDetail({
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <MiniStat label="Opportunity" value={stock.opportunity_score?.toFixed(0) ?? '—'} hint="Fit + flows − risk" />
+              <MiniStat label="Research score" value={stock.opportunity_score?.toFixed(0) ?? '—'} hint="Fit + flows − risk" />
               <MiniStat label="Peer group" value={`${peerCount.toLocaleString('en-IN')} stocks`} hint={`${bucketLabel}-cap, same rating basis`} />
               <MiniStat label="Data coverage" value={`${((stock.coverage ?? 0) * 100).toFixed(0)}%`} hint={`${stock.pillars_used ?? 0} of 5 pillars used`} />
               <MiniStat label="Median turnover" value={formatTurnover(stock.turnover_median)} hint="NSE traded value/day" />
@@ -528,8 +528,10 @@ export function StockDetail({
             ))}
           </div>
           <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-            Best horizon: <span className="text-foreground">{stock.best_horizon ? HORIZON_LABEL[stock.best_horizon] : '—'}</span>.
+            Scores highest over <span className="text-foreground">{stock.best_horizon ? HORIZON_LABEL[stock.best_horizon] : '—'}</span>.
             The score combines fundamentals, technicals, liquidity and official NSE/BSE events.
+            It describes which horizon this company's measured characteristics fit best — not
+            how long anyone should hold it.
           </p>
         </Section>
 

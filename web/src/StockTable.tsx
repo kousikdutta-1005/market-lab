@@ -304,7 +304,7 @@ export function StockTable({
                         <div className={`text-2xl font-semibold tabular-nums tracking-[-0.03em] ${scoreColor(s.opportunity_score)}`}>
                           {s.opportunity_score?.toFixed(0) ?? '—'}
                         </div>
-                        <div className="text-[11px] text-muted-foreground">opportunity</div>
+                        <div className="text-[11px] text-muted-foreground">research score</div>
                       </div>
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
