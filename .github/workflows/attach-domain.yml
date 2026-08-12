@@ -11,7 +11,7 @@ on:
     inputs:
       domain:
         description: "Domain to attach"
-        default: experiments.kousikdutta.com
+        default: nse.kousikdutta.com
       project:
         description: "Pages project name"
         default: market-lab

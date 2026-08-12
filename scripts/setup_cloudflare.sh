@@ -19,7 +19,7 @@ set -euo pipefail
 
 ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-35d86148a77cfdca59d5ab2fcb7c52aa}"
 PROJECT="${CF_PROJECT:-market-lab}"
-DOMAIN="${CF_DOMAIN:-experiments.kousikdutta.com}"
+DOMAIN="${CF_DOMAIN:-nse.kousikdutta.com}"
 REPO="${GH_REPO:-kousikdutta-1005/market-lab}"
 API="https://api.cloudflare.com/client/v4"
 

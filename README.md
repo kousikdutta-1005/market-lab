@@ -78,7 +78,7 @@ happened to pick; the distribution of *every* 3-year window is much harder to fo
 
 `run.sh` is the local path: it builds the UI and starts a small FastAPI process so the
 **Refresh** button can actually run the pipeline. The public site at
-`experiments.kousikdutta.com` is the same build with no backend at all.
+`nse.kousikdutta.com` is the same build with no backend at all.
 
 One thing to be deliberate about: publishing stock scores in India sits near
 SEBI's research-analyst rules. This is why the tool ranks *research fit* rather than
@@ -256,7 +256,7 @@ Columnar encoding and rounding to displayed precision cut the board from **519 K
 
 ### Hosting
 
-Deployed to **Cloudflare Pages** at `experiments.kousikdutta.com`, because its free tier
+Deployed to **Cloudflare Pages** at `nse.kousikdutta.com`, because its free tier
 meters neither bandwidth nor requests, so traffic growth cannot generate a bill.
 
 GitHub Pages was the original target and is the wrong one. A first visit is about 660 KB
