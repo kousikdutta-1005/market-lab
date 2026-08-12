@@ -25,8 +25,11 @@ export default defineConfig({
      * ports — so an unrelated dev server on 5173 pushed this one to 5174 and every API
      * call was rejected, with the board still rendering because it falls back to static
      * data. Failing loudly on a busy port beats a half-working page.
+     *
+     * 5190 rather than 517x/5180 because those belong to the other *-lab projects on
+     * this machine. Override with ML_DEV_PORT if it ever collides again.
      */
-    port: 5180,
+    port: Number(process.env.ML_DEV_PORT) || 5190,
     strictPort: true,
     // Listen on all interfaces and accept proxied Host headers so preview panes,
     // tunnels and phones on the LAN can reach the dev server.
