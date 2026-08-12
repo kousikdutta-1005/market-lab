@@ -4,6 +4,14 @@ import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
+  /**
+   * Root by default, overridable for a subpath deploy.
+   *
+   * On its own domain the site sits at /. On GitHub Pages under a project repo it sits at
+   * /market-lab/, and every asset and data URL has to agree — the data layer already
+   * builds its paths from import.meta.env.BASE_URL for exactly this reason.
+   */
+  base: process.env.BASE_PATH || '/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
