@@ -623,7 +623,7 @@ export function deriveFindings(a: PortfolioAnalysis, perf: Performance | null): 
     out.push({
       id: 'diversified',
       severity: 'good',
-      headline: 'Position sizing looks sensible',
+      headline: 'No single position dominates',
       detail: `No holding dominates and the mix behaves like ${a.concentration.effectiveHoldings.toFixed(1)} independent positions.`,
     });
   }

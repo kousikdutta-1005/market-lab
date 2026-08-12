@@ -477,3 +477,39 @@ test('the screener exports every matching row, not just the page', async ({ page
   expect(lines.length - 1).toBe(shown);
   expect(text).toContain('RELIANCE');
 });
+
+test('the board states its boundary and avoids recommendation language', async ({ page }) => {
+  // This is a research tool, and the difference between that and an advisory service is
+  // partly structural and partly what the words on screen claim. The structure is hard to
+  // regress by accident; the words are not — they drift back one label at a time. So the
+  // boundary is asserted, and the vocabulary that contradicts it is banned outright.
+  await page.goto(BASE);
+
+  // Always visible, not behind a disclosure.
+  await page.getByRole('button', { name: 'Methodology' }).first().click();
+  await expect(page.getByText('What this is, and what it is not')).toBeVisible();
+  await expect(page.getByText(/not investment advice, a\s+recommendation, or a solicitation/i)).toBeVisible();
+  await expect(page.getByText(/percentile rank against comparable companies/i)).toBeVisible();
+
+  // Language that promises action rather than describing a measurement. "Not
+  // recommendations" is fine and deliberately not matched here.
+  const banned = [
+    /\bhigh[- ]conviction\b/i,
+    /\btop pick/i,
+    /\bstrong buy\b/i,
+    /\bmust[- ]own\b/i,
+    /\bguaranteed\b/i,
+    /\bprice target\b/i,
+    /\bwill (rise|fall|outperform)\b/i,
+    /\bbest suited for\b/i,
+  ];
+
+  for (const tab of ['Rankings', 'Screener', 'Investors', 'Portfolio', 'Methodology']) {
+    await page.getByRole('button', { name: tab }).first().click();
+    await page.waitForTimeout(400);
+    const text = await page.locator('main').innerText();
+    for (const pattern of banned) {
+      expect(text, `"${pattern}" appeared on the ${tab} tab`).not.toMatch(pattern);
+    }
+  }
+});

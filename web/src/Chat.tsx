@@ -154,6 +154,13 @@ export function Chat({
             <Sparkles className="size-4 text-primary" />
             AI assistant
           </SheetTitle>
+          {/* Says the boundary up front rather than deflecting after someone asks. The
+              model is instructed the same way, but an instruction is a request — this is
+              what the reader actually sees. */}
+          <p className="t-meta text-muted-foreground">
+            Answers from the data on this board and quotes the rows it used. It will not tell
+            you what to buy or sell, name price targets, or predict prices.
+          </p>
         </SheetHeader>
 
         {!config ? (

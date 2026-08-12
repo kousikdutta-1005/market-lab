@@ -24,6 +24,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import { ApiHealth } from './ApiHealth';
 import { Caveats } from './Caveats';
 import { Disclosure } from './Disclosure';
+import { Callout } from './Callout';
 import LiveStatus from './LiveStatus';
 import { StockDetail } from './StockDetail';
 import { StockTable } from './StockTable';
@@ -661,6 +662,30 @@ export default function App() {
               <p className="-mt-1 text-[13px] text-muted-foreground">
                 How every score is calculated, where the data comes from, and what has been excluded.
               </p>
+
+              {/* Always open. The caveats below are the detail; this is the boundary, and it
+                  should not be something a reader has to expand to find. */}
+              <Callout tone="info" title="What this is, and what it is not">
+                <p className="leading-relaxed">
+                  market-lab is a research tool. It ranks listed companies against their peers on
+                  published, measurable criteria and shows the working behind every number. That is
+                  the whole of what it does.
+                </p>
+                <p className="mt-2 leading-relaxed">
+                  It is <span className="font-medium text-foreground">not</span> investment advice, a
+                  recommendation, or a solicitation to buy or sell any security. It does not know
+                  your circumstances, does not suggest what to hold or how much, and does not
+                  execute anything. A score is a percentile rank against comparable companies — a
+                  measurement of what the data says today, not a forecast of what a price will do
+                  tomorrow. Nobody here is registered with SEBI as a research analyst or an
+                  investment adviser.
+                </p>
+                <p className="mt-2 leading-relaxed">
+                  Every input is an official exchange or regulator filing, every calculation is
+                  described below, and the code is public — so you can check the work rather than
+                  trust it. Decisions, and their consequences, are yours.
+                </p>
+              </Callout>
 
               <Caveats screen={screen} />
 
