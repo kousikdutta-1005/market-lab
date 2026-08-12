@@ -276,6 +276,15 @@ data in it. GitHub Actions runs the pipeline, builds, verifies, and uploads the 
 If a git-connected project already exists under this name, delete it before the first
 deploy: Cloudflare refuses direct uploads to a project it builds itself.
 
+`scripts/setup_cloudflare.sh` does all of that — deletes a git-connected project, creates
+the direct-upload one, attaches the custom domain, and stores both repository secrets. It
+is idempotent. The one step it cannot do is mint the API token, because Cloudflare will
+not issue one without an existing credential:
+
+```
+CLOUDFLARE_API_TOKEN=xxx ./scripts/setup_cloudflare.sh
+```
+
 `web/public/_headers` sets the cache policy Cloudflare/Netlify read: fingerprinted assets
 are immutable, data files are edge-cached for minutes-to-hours with
 `stale-while-revalidate`, and the HTML shell is never cached hard (otherwise visitors keep
