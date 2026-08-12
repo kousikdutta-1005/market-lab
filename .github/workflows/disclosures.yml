@@ -91,7 +91,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy web/dist --project-name=market-lab-4dk --branch=main
+          command: pages deploy web/dist --project-name=market-lab --branch=main
 
       - name: Commit new sessions to the archive
         run: |

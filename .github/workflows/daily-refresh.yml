@@ -111,7 +111,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy web/dist --project-name=market-lab-4dk --branch=main
+          command: pages deploy web/dist --project-name=market-lab --branch=main
 
       # Last, so a failed build or deploy never commits an archive for a run that did not
       # publish. Only the raw exchange files are committed; everything derived from them

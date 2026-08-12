@@ -14,7 +14,7 @@ on:
         default: experiments.kousikdutta.com
       project:
         description: "Pages project name"
-        default: market-lab-4dk
+        default: market-lab
 
 jobs:
   attach:
