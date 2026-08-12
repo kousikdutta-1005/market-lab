@@ -89,24 +89,8 @@ jobs:
       - name: Verify the bundle before deploying
         run: python scripts/verify_static.py
 
-      # Cloudflare serves from the domain root; GitHub Pages serves a project repo from
-      # /market-lab/. Every asset and data URL has to match whichever one is publishing,
-      # so the base path follows the target rather than being hardcoded.
-      - name: Choose the publish target
-        id: target
-        run: |
-          if [ -n "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
-            echo "target=cloudflare" >> "$GITHUB_OUTPUT"
-            echo "base=/" >> "$GITHUB_OUTPUT"
-          else
-            echo "target=pages" >> "$GITHUB_OUTPUT"
-            echo "base=/market-lab/" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Build web app
         working-directory: web
-        env:
-          BASE_PATH: ${{ steps.target.outputs.base }}
         run: |
           npm ci
           npm run build
@@ -123,25 +107,11 @@ jobs:
       # above and web/public/data is gitignored, so a Cloudflare-side build produces a
       # shell with no data in it. The bundle is built and verified here, then uploaded.
       - name: Deploy to Cloudflare Pages
-        if: steps.target.outputs.target == 'cloudflare'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy web/dist --project-name=market-lab --branch=main
-
-      # Interim target until the Cloudflare token exists. Its bandwidth cap makes it the
-      # wrong long-term home, but it is a separate repository from the portfolio, so its
-      # cap is its own and a busy day here cannot take that site down. Deleting the
-      # CLOUDFLARE_API_TOKEN secret reverts to this automatically.
-      - name: Deploy to GitHub Pages
-        if: steps.target.outputs.target == 'pages'
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: web/dist
-          publish_branch: gh-pages
-          commit_message: "Publish ${{ github.sha }}"
+          command: pages deploy web/dist --project-name=market-lab-4dk --branch=main
 
       # Last, so a failed build or deploy never commits an archive for a run that did not
       # publish. Only the raw exchange files are committed; everything derived from them
