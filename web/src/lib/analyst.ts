@@ -215,7 +215,10 @@ export async function askAnalyst(
   try {
     plan = JSON.parse(planRaw);
   } catch {
-    plan = {};
+    throw new Error('The assistant could not structure this question against the board data. Rephrase it as a comparison, filter, or methodology question and retry.');
+  }
+  if (plan.queries != null && !Array.isArray(plan.queries)) {
+    throw new Error('The assistant returned an invalid query plan. Retry the question or change providers.');
   }
 
   // 2. EXECUTE locally against the real dataset

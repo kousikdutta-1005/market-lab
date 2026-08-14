@@ -21,12 +21,25 @@ const RANK_WIDTH = 48;
 const STORE_KEY = 'marketlab.table.v1';
 
 type Persisted = { preset: string | null; columns: string[]; compact: boolean; pageSize: number };
+type LoadedPrefs = { prefs: Partial<Persisted>; warning: string | null };
 
-function loadPrefs(): Partial<Persisted> {
+function loadPrefs(): LoadedPrefs {
   try {
-    return JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}') as Partial<Persisted>;
+    const parsed = JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}') as Partial<Persisted>;
+    const validColumns = Array.isArray(parsed.columns) && parsed.columns.every((column) => typeof column === 'string');
+    return {
+      prefs: {
+        preset: typeof parsed.preset === 'string' || parsed.preset === null ? parsed.preset : undefined,
+        columns: validColumns ? parsed.columns : undefined,
+        compact: typeof parsed.compact === 'boolean' ? parsed.compact : undefined,
+        pageSize: typeof parsed.pageSize === 'number' && [25, 50, 100].includes(parsed.pageSize) ? parsed.pageSize : undefined,
+      },
+      warning: validColumns || !localStorage.getItem(STORE_KEY)
+        ? null
+        : 'Saved table preferences were invalid and have been reset.',
+    };
   } catch {
-    return {};
+    return { prefs: {}, warning: 'Saved table preferences could not be read and have been reset.' };
   }
 }
 
@@ -55,14 +68,18 @@ export function StockTable({
    * Either way the choice is now the user's — this only sets the starting point.
    */
   dense = true,
+  onResetFilters,
 }: {
   stocks: Stock[];
   selected: string | null;
   onSelect: (t: string) => void;
   rankingKey: HorizonScoreKey;
   dense?: boolean;
+  onResetFilters?: () => void;
 }) {
-  const prefs = useRef(loadPrefs()).current;
+  const loadedPrefs = useRef(loadPrefs()).current;
+  const prefs = loadedPrefs.prefs;
+  const [prefsWarning, setPrefsWarning] = useState(loadedPrefs.warning);
   const defaultPreset = dense ? 'screener' : 'essentials';
 
   const [sortKey, setSortKey] = useState<keyof Stock>(rankingKey);
@@ -91,10 +108,14 @@ export function StockTable({
   const tableWidth = RANK_WIDTH + columns.reduce((a, c) => a + c.width, 0);
 
   useEffect(() => {
-    localStorage.setItem(
-      STORE_KEY,
-      JSON.stringify({ preset, columns: visibleCols, compact, pageSize } satisfies Persisted),
-    );
+    try {
+      localStorage.setItem(
+        STORE_KEY,
+        JSON.stringify({ preset, columns: visibleCols, compact, pageSize } satisfies Persisted),
+      );
+    } catch {
+      setPrefsWarning('Table changes work for this visit but could not be saved in browser storage.');
+    }
   }, [preset, visibleCols, compact, pageSize]);
 
   const rows = useMemo(() => {
@@ -173,6 +194,12 @@ export function StockTable({
 
   return (
     <Card className="overflow-hidden">
+      {prefsWarning && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-2 border-b border-warning/30 bg-warning-subtle px-3 py-2 text-xs text-foreground">
+          <span>{prefsWarning}</span>
+          <Button variant="ghost" size="xs" onClick={() => setPrefsWarning(null)}>Dismiss</Button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2 border-b p-3">
         <div className="relative min-w-full flex-1 sm:min-w-52">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -180,6 +207,7 @@ export function StockTable({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search symbol or company…"
+            aria-label="Search stocks by symbol or company"
             className="h-11 pl-9 text-base sm:h-8 sm:text-sm"
           />
         </div>
@@ -266,6 +294,11 @@ export function StockTable({
               }}
             >
               Clear search and sector
+            </Button>
+          )}
+          {!query && sector === 'all' && onResetFilters && (
+            <Button variant="outline" size="sm" className="mt-1" onClick={onResetFilters}>
+              Reset all filters
             </Button>
           )}
         </div>
@@ -391,6 +424,15 @@ export function StockTable({
                     <TableRow
                       key={s.symbol}
                       onClick={() => onSelect(s.symbol)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onSelect(s.symbol);
+                        }
+                      }}
+                      tabIndex={0}
+                      aria-label={`Open ${s.symbol} factsheet`}
                       aria-selected={isSelected}
                       className={`cursor-pointer transition-colors ${
                         isSelected ? 'bg-primary/10 hover:bg-primary/10' : idx % 2 ? 'bg-muted/30' : ''

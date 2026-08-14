@@ -18,6 +18,7 @@ const VIEWS: {
   { name: 'Screener', open: async (p) => { await p.getByRole('button', { name: 'Screener' }).first().click(); } },
   { name: 'Investors', open: async (p) => { await p.getByRole('button', { name: 'Investors' }).first().click(); } },
   { name: 'Portfolio', open: async (p) => { await p.getByRole('button', { name: 'Portfolio' }).first().click(); } },
+  { name: 'Assistant setup', open: async (p) => { await p.getByRole('button', { name: 'AI assistant' }).click(); } },
   {
     // The column picker is a menu over a scrolling table — exactly the combination that
     // tends to lose focus management or label its checkboxes by icon alone.
@@ -60,7 +61,7 @@ for (const theme of ['light', 'dark'] as const) {
       await page.waitForTimeout(500);
 
       let builder = new AxeBuilder({ page }).withTags([
-        'wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa',
+        'wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa',
       ]);
       if (view.skipRules) builder = builder.disableRules(view.skipRules);
       const results = await builder.analyze();

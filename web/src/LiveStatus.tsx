@@ -92,8 +92,9 @@ export default function LiveStatus({ onDataChanged, screen }: Props) {
   const phase = marketPhase();
   const staticMode = hasBackend === false;
 
-  const session = status?.data?.last_trading_session ?? screen?.last_trading_session ?? '—';
+  const session = status?.data?.last_trading_session || screen?.last_trading_session || 'unavailable';
   const age = staticMode ? ageSeconds(screen?.generated_at) : status?.data?.age_s;
+  const stale = age != null && age > 4 * 86400;
   const phaseColor = phase.isOpen ? 'text-success' : 'text-muted-foreground';
 
   return (
@@ -154,6 +155,21 @@ export default function LiveStatus({ onDataChanged, screen }: Props) {
           <div className="mt-3 flex items-center gap-2 text-sm font-medium text-success">
             <Check className="h-4 w-4" />
             Refresh complete
+          </div>
+        )}
+
+        {stale && (
+          <div role="status" className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning-subtle p-3 text-sm">
+            <span className="text-foreground">
+              <span className="font-medium">Published data is stale.</span>{' '}
+              <span className="text-muted-foreground">
+                This build is {formatAge(age)}. Scores still describe that older session, not the current market.
+              </span>
+            </span>
+            <Button variant="outline" size="sm" onClick={staticMode ? onDataChanged : refresh}>
+              <RefreshCw className="size-3" />
+              {staticMode ? 'Recheck published data' : 'Refresh data'}
+            </Button>
           </div>
         )}
 

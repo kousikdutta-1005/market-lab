@@ -247,6 +247,12 @@ export interface Screen {
   investor_holdings?: InvestorPortfolio[];
   shp_symbols?: number;
   disclosures_updated_at?: string;
+  client_quality?: {
+    issues: string[];
+    rejected_rows: number;
+    duplicate_rows: number;
+    incomplete_rows: number;
+  };
   stocks: Stock[];
   excluded: ExcludedStock[];
 }

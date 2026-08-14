@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
+  AlertTriangle,
   CalendarDays,
+  CloudOff,
   Database,
   Download,
   EyeOff,
@@ -9,6 +11,7 @@ import {
   Layers,
   Loader2,
   MoreVertical,
+  RotateCw,
   ShieldCheck,
   Sparkles,
   TrendingUp,
@@ -129,6 +132,7 @@ function useMediaQuery(query: string) {
 export default function App() {
   const [screen, setScreen] = useState<Screen | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [buckets, setBuckets] = useState<Set<SizeBucket>>(new Set(BUCKETS));
   const [basis, setBasis] = useState<'all' | RatingBasis>('all');
@@ -149,11 +153,14 @@ export default function App() {
   const horizonMeta = HORIZONS.find((h) => h.key === horizon) ?? HORIZONS[1];
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       setScreen(await loadScreen());
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -170,38 +177,57 @@ export default function App() {
     });
   };
 
-  const visible = useMemo(() => {
-    if (!screen) return [];
-    
-    // Evaluate custom formula if provided
-    let customEval: ((s: Stock) => boolean) | null = null;
+  const customEvaluator = useMemo(() => {
+    if (!customFormula.trim()) return { evaluate: null, error: null };
     if (customFormula.trim()) {
       try {
-        // Create a safe evaluator function
-        // Replaces variable names with s.variableName
         let expression = customFormula.trim().toLowerCase();
-        // Extract all word characters that aren't operators or numbers
-        const vars = Array.from(new Set(expression.match(/[a-z_][a-z0-9_]*/g) || []));
+        if (/[a-z_][a-z0-9_]*\s*\(/i.test(expression)) {
+          throw new Error('Function calls are not supported in formulas.');
+        }
+        const strings: string[] = [];
+        const withoutStrings = expression.replace(/(['"])(?:\\.|(?!\1).)*\1/g, (value) => {
+          strings.push(value);
+          return `@@${strings.length - 1}@@`;
+        });
+        const vars = Array.from(new Set(withoutStrings.match(/[a-z_][a-z0-9_]*/g) || []));
         const safeVars = ['and', 'or', 'true', 'false', 'null'];
-        
-        let jsExpr = expression.replace(/\band\b/g, '&&').replace(/\bor\b/g, '||');
+        let jsExpr = withoutStrings.replace(/\band\b/g, '&&').replace(/\bor\b/g, '||');
         vars.forEach(v => {
           if (!safeVars.includes(v)) {
             const regex = new RegExp(`\\b${v}\\b`, 'g');
             jsExpr = jsExpr.replace(regex, `(s.${v} ?? 0)`);
           }
         });
-        
-        // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
-        customEval = new Function('s', `try { return !!(${jsExpr}); } catch(e) { return false; }`) as (s: Stock) => boolean;
-      } catch (e) {
-        // Ignore invalid formulas until they are valid
-        customEval = null;
+        jsExpr = jsExpr.replace(/@@(\d+)@@/g, (_, index: string) => strings[Number(index)]);
+        const evaluate = new Function('s', `return !!(${jsExpr});`) as (s: Stock) => boolean;
+        evaluate({} as Stock);
+        return { evaluate, error: null };
+      } catch {
+        return {
+          evaluate: null,
+          error: 'This formula is not valid yet. It is not being applied.',
+        };
       }
     }
+    return { evaluate: null, error: null };
+  }, [customFormula]);
 
+  const formulaRuntimeError = useMemo(() => {
+    if (!screen || !customEvaluator.evaluate || customEvaluator.error) return null;
+    try {
+      for (const stock of screen.stocks) customEvaluator.evaluate(stock);
+      return null;
+    } catch {
+      return 'This formula fails on the published rows. It is not being applied.';
+    }
+  }, [screen, customEvaluator]);
+  const formulaError = customEvaluator.error ?? formulaRuntimeError;
+
+  const visible = useMemo(() => {
+    if (!screen) return [];
     return screen.stocks.filter((stock) => {
-      if (customEval && !customEval(stock)) return false;
+      if (!formulaError && customEvaluator.evaluate && !customEvaluator.evaluate(stock)) return false;
       if (stock.bucket && !buckets.has(stock.bucket)) return false;
       if (basis !== 'all' && stock.rating_basis !== basis) return false;
       const fit = stock[horizonMeta.scoreKey] ?? 0;
@@ -237,7 +263,23 @@ export default function App() {
     newsFilter,
     riskFilter,
     flowFilter,
+    customEvaluator,
+    formulaError,
   ]);
+
+  const resetFilters = useCallback(() => {
+    setBuckets(new Set(BUCKETS));
+    setBasis('all');
+    setMinFit(0);
+    setFundamentalFilter('all');
+    setTechnicalFilter('all');
+    setNewsFilter('all');
+    setRiskFilter('avoid-high');
+    setFlowFilter('all');
+    setLiquidityFloor(0);
+    setCustomFormula('');
+    setFiltersOpen(false);
+  }, []);
 
   // Keyboard navigation over whatever is currently on screen.
   useKeyboardNav({
@@ -250,28 +292,53 @@ export default function App() {
   const opportunities = useMemo(
     () =>
       [...visible]
+        .filter((stock) => typeof stock.opportunity_score === 'number' && Number.isFinite(stock.opportunity_score))
         .sort((a, b) => (b.opportunity_score ?? -Infinity) - (a.opportunity_score ?? -Infinity))
         .slice(0, mode === 'guided' ? 6 : 3),
     [visible, mode],
   );
 
-  if (error && !screen) {
+  if (error && !screen && !loading) {
     return (
-      <div className="grid min-h-screen place-items-center p-8 text-center">
-        <div>
-          <p className="text-danger">Could not load the screen — {error}</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Run <code className="rounded-md bg-white px-1.5 py-0.5">./run.sh</code> from the project root, then reload.
+      <main className="grid min-h-screen place-items-center px-4 py-10">
+        <div role="alert" className="w-full max-w-lg rounded-xl border border-danger/30 bg-card p-6 shadow-sm sm:p-8">
+          <div className="grid size-10 place-items-center rounded-full bg-danger-subtle text-danger">
+            {typeof navigator !== 'undefined' && !navigator.onLine
+              ? <CloudOff className="size-5" />
+              : <AlertTriangle className="size-5" />}
+          </div>
+          <h1 className="mt-4 text-xl font-semibold text-foreground">Market data did not load</h1>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            {typeof navigator !== 'undefined' && !navigator.onLine
+              ? 'This visit needs the published market files, and the browser is offline. Reconnect and retry.'
+              : 'The app shell is available, but the published market file is missing, damaged, or temporarily unreachable. No scores are shown without their source data.'}
           </p>
+          <p className="mt-3 break-words rounded-lg bg-muted px-3 py-2 font-mono text-xs text-muted-foreground">
+            {error}
+          </p>
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Button onClick={load}>
+              <RotateCw className="size-4" />
+              Retry data
+            </Button>
+            <Button variant="outline" asChild>
+              <a href="https://github.com/kousikdutta-1005/market-lab#known-caveats--read-these-before-trusting-a-number">
+                Inspect methodology
+              </a>
+            </Button>
+          </div>
         </div>
-      </div>
+      </main>
     );
   }
 
   if (!screen) {
     return (
-      <div className="grid min-h-screen place-items-center">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      <div className="grid min-h-screen place-items-center" role="status" aria-live="polite">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-5 animate-spin" />
+          Loading published market data…
+        </div>
       </div>
     );
   }
@@ -388,11 +455,19 @@ export default function App() {
                   value={customFormula}
                   onChange={(e) => setCustomFormula(e.target.value)}
                   placeholder="pe < 15 and roe > 0.15"
+                  aria-invalid={!!formulaError}
+                  aria-describedby={formulaError ? 'ml-formula-error' : undefined}
                   className="h-9 font-mono text-xs"
                 />
-                <p className="mt-1.5 t-meta text-muted-foreground">
-                  Any expression over stock fields. The assistant writes these for you too.
-                </p>
+                {formulaError ? (
+                 <p id="ml-formula-error" role="alert" className="mt-1.5 t-meta text-danger">
+                   {formulaError}
+                 </p>
+                ) : (
+                 <p className="mt-1.5 t-meta text-muted-foreground">
+                   Any expression over stock fields. The assistant writes these for you too.
+                 </p>
+                )}
               </div>
             </div>
           </Disclosure>
@@ -496,6 +571,37 @@ export default function App() {
           <LiveStatus onDataChanged={load} screen={screen} />
         </div>
 
+        {error && (
+          <Callout tone="warning" title="Showing the last data already on this page" className="mb-5" icon={<AlertTriangle className="size-4" />}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span>
+                A refresh failed, so the current screen was kept instead of being replaced with an empty result. {error}
+              </span>
+              <Button variant="outline" size="sm" onClick={load}>Retry refresh</Button>
+            </div>
+          </Callout>
+        )}
+
+        {(screen.client_quality?.issues.length ?? 0) > 0 && (
+          <Callout tone="warning" title="This build has incomplete data" className="mb-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <span>{screen.client_quality?.issues.join(' ')}</span>
+              <Button variant="outline" size="sm" onClick={() => setTab('trust')}>Inspect methodology</Button>
+            </div>
+          </Callout>
+        )}
+
+        {screen.stocks.length === 0 && (
+          <Callout tone="danger" title="No ranked rows were published" className="mb-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <span>
+                The dataset loaded, but it contains no usable stocks. This is different from a filter returning no matches, so the app will not show zero as a healthy market result.
+              </span>
+              <Button variant="outline" size="sm" onClick={load}>Retry data</Button>
+            </div>
+          </Callout>
+        )}
+
         <div className={tab === 'screen' ? 'grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]' : ''}>
           {tab === 'screen' && (
             <nav className="hidden space-y-4 lg:sticky lg:top-[136px] lg:block lg:self-start" aria-label="Research filters">
@@ -508,7 +614,7 @@ export default function App() {
             {tab === 'discover' && (
             <Disclosure
               title={`Market today: ${screen.market_regime ?? 'unknown'}`}
-              summary={`${screen.breadth_advance_pct?.toFixed(0) ?? '—'}% of stocks advancing · ${screen.scored.toLocaleString('en-IN')} of ${screen.universe_total.toLocaleString('en-IN')} scored · session ${screen.last_trading_session}`}
+              summary={`${screen.breadth_advance_pct?.toFixed(0) ?? '—'}% of stocks advancing · ${screen.scored.toLocaleString('en-IN')} of ${screen.universe_total.toLocaleString('en-IN')} scored · session ${screen.last_trading_session || 'unavailable'}`}
               icon={<Activity className="size-4" />}
             >
               <p className="text-[13px] leading-relaxed text-muted-foreground">
@@ -521,7 +627,7 @@ export default function App() {
                   value={`${screen.scored.toLocaleString('en-IN')} / ${screen.universe_total.toLocaleString('en-IN')}`}
                   detail="Normal NSE EQ-series stocks."
                 />
-                <MetricTile icon={CalendarDays} label="Last session" value={screen.last_trading_session} detail="Official NSE EOD bhavcopy." />
+                <MetricTile icon={CalendarDays} label="Last session" value={screen.last_trading_session || 'Unavailable'} detail="Official NSE EOD bhavcopy." />
                 <MetricTile
                   icon={Users}
                   label="Breadth"
@@ -531,8 +637,8 @@ export default function App() {
                 <MetricTile
                   icon={Sparkles}
                   label="Flows"
-                  value={`${screen.deal_symbols ?? 0} symbols`}
-                  detail={`${screen.delivery_symbols ?? 0} with delivery data.`}
+                  value={screen.deal_status && screen.deal_status !== 'ok' ? 'Unavailable' : `${screen.deal_symbols ?? 0} symbols`}
+                  detail={screen.delivery_status && screen.delivery_status !== 'ok' ? 'Delivery coverage unavailable in this build.' : `${screen.delivery_symbols ?? 0} with delivery data.`}
                   drill={{ label: 'Show only stocks with large deals', onSelect: () => setFlowFilter('large-deals') }}
                 />
                 <MetricTile
@@ -552,8 +658,8 @@ export default function App() {
                 <MetricTile
                   icon={ShieldCheck}
                   label="Risk"
-                  value={`${screen.high_risk_symbols ?? 0} high-risk`}
-                  detail={`${screen.fo_ban_count ?? 0} in F&O ban · median 1m move ${screen.median_1m_return_pct?.toFixed(1) ?? '—'}%.`}
+                  value={screen.risk_status && screen.risk_status !== 'ok' ? 'Unavailable' : `${screen.high_risk_symbols ?? 0} high-risk`}
+                  detail={screen.risk_status && screen.risk_status !== 'ok' ? 'The defensive risk layer did not complete; no low-risk conclusion should be drawn.' : `${screen.fo_ban_count ?? 0} in F&O ban · median 1m move ${screen.median_1m_return_pct?.toFixed(1) ?? '—'}%.`}
                   drill={{ label: 'Show only low-risk stocks', onSelect: () => setRiskFilter('low') }}
                 />
               </section>
@@ -578,9 +684,25 @@ export default function App() {
                   <div className="text-xs font-medium text-muted-foreground">{strongMatches.toLocaleString('en-IN')} score 80+ on low risk</div>
                 </CardHeader>
                 <div className="divide-y">
-                  {opportunities.map((stockItem, i) => (
+                  {opportunities.length ? opportunities.map((stockItem, i) => (
                     <OpportunityCard key={stockItem.symbol} stock={stockItem} rank={i + 1} onSelect={setSelected} />
-                  ))}
+                  )) : (
+                    <div className="px-5 py-12 text-center" role="status">
+                      <p className="text-sm font-medium text-foreground">
+                        {screen.stocks.length ? 'No ranked ideas match the current filters' : 'No ranked ideas are available in this build'}
+                      </p>
+                      <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">
+                        {screen.stocks.length
+                          ? 'Nothing is hidden behind a zero score. Widen the filters to restore complete risk, liquidity, and horizon context.'
+                          : 'Retry the published data or inspect the methodology before relying on this session.'}
+                      </p>
+                      {screen.stocks.length > 0 && (
+                        <Button variant="outline" size="sm" className="mt-4" onClick={resetFilters}>
+                          Reset all filters
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </Card>
               </section>
@@ -626,6 +748,7 @@ export default function App() {
                 onSelect={setSelected}
                 rankingKey={horizonMeta.scoreKey}
                 dense={mode === 'pro'}
+                onResetFilters={resetFilters}
               />
               {stock && !compactLayout && tab === 'screen' && (
                 <StockDetail stock={stock} screen={screen} onClose={() => setSelected(null)} />
@@ -804,7 +927,7 @@ export default function App() {
 
             <footer className="space-y-2 pb-5 text-xs leading-relaxed text-muted-foreground">
               <p>
-                Generated {new Date(screen.generated_at).toLocaleString('en-IN')} · {screen.source} · {screen.sessions} sessions.
+                Generated {screen.generated_at ? new Date(screen.generated_at).toLocaleString('en-IN') : 'time unavailable'} · {screen.source} · {screen.sessions || 'unknown'} sessions.
                 Free layers include {screen.deal_source}, {screen.delivery_source}, {screen.news_source} and {screen.risk_source}.
               </p>
               {/* Its own line, not the tail of a sentence about build metadata. This is the

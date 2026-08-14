@@ -51,6 +51,30 @@ interface Message {
   evidence?: AnalystResult['queries'];
   unverified?: string[];
   isError?: boolean;
+  retryQuestion?: string;
+}
+
+function unsupportedQuestion(question: string): boolean {
+  return [
+    /\b(recommend|suggest|pick)\b.{0,40}\b(stock|share|ticker|trade|investment)s?\b/i,
+    /\b(what|which|best)\b.{0,50}\b(buy|sell|purchase|trade)\b/i,
+    /\bshould\s+(i|we)\s+(buy|sell|purchase|trade)\b/i,
+    /\b(buy|sell|purchase)\b.{0,30}\b(now|today)\b/i,
+    /\b(price\s+target|predict|forecast)\b/i,
+    /\bwill\s+.{1,50}\s+(rise|fall|outperform|underperform)\b/i,
+    /\bhow\s+much\s+should\s+(i|we)\s+(invest|allocate)\b/i,
+  ].some((pattern) => pattern.test(question));
+}
+
+function assistantError(error: unknown): string {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return 'The assistant is offline. The market board still works from published data; reconnect and retry this question.';
+  }
+  const detail = error instanceof Error ? error.message : String(error);
+  if (/failed to fetch|networkerror|load failed/i.test(detail)) {
+    return 'The selected AI provider could not be reached. Check the connection or provider URL, then retry.';
+  }
+  return detail || 'The selected AI provider did not return an answer.';
 }
 
 export function Chat({
@@ -67,6 +91,7 @@ export function Chat({
   onSelectStock: (symbol: string) => void;
 }) {
   const [config, setConfig] = useState<AIConfig | null>(loadConfig);
+  const [configNotice, setConfigNotice] = useState<string | null>(null);
   const [draftProvider, setDraftProvider] = useState<ProviderId>('gemini');
   const [draftKey, setDraftKey] = useState('');
   const [draftModel, setDraftModel] = useState('');
@@ -92,7 +117,12 @@ export function Chat({
       model: (draftModel.trim() || spec.defaultModel),
       baseUrl: draftBase.trim() || undefined,
     };
-    localStorage.setItem(CONFIG_STORAGE, JSON.stringify(cfg));
+    try {
+      localStorage.setItem(CONFIG_STORAGE, JSON.stringify(cfg));
+      setConfigNotice(null);
+    } catch {
+      setConfigNotice('The model is connected for this tab, but browser storage is unavailable. The key was not saved.');
+    }
     setConfig(cfg);
     setDraftKey('');
   };
@@ -101,6 +131,16 @@ export function Chat({
     if (!question.trim() || loading || !config) return;
     setInput('');
     setMessages((prev) => [...prev, { role: 'user', text: question }]);
+    if (unsupportedQuestion(question)) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          text: 'That request is outside this tool’s boundary. I cannot recommend a trade, set a price target, or predict a price. I can compare measurable factors instead—for example, ask for the liquidity, risk flags, valuation, or horizon fit of named stocks.',
+        },
+      ]);
+      return;
+    }
     setLoading(true);
     setStage('Reading the board…');
 
@@ -138,7 +178,7 @@ export function Chat({
     } catch (e) {
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', text: e instanceof Error ? e.message : String(e), isError: true },
+        { role: 'assistant', text: assistantError(e), isError: true, retryQuestion: question },
       ]);
     } finally {
       setLoading(false);
@@ -161,6 +201,11 @@ export function Chat({
             Answers from the data on this board and quotes the rows it used. It will not tell
             you what to buy or sell, name price targets, or predict prices.
           </p>
+          {configNotice && (
+            <div role="status" className="mt-2 rounded-lg border border-warning/30 bg-warning-subtle px-3 py-2 text-xs text-foreground">
+              {configNotice}
+            </div>
+          )}
         </SheetHeader>
 
         {!config ? (
@@ -265,7 +310,7 @@ export function Chat({
         ) : (
           <>
             <ScrollArea className="flex-1 p-4" ref={scrollRef}>
-              <div className="space-y-4">
+              <div className="space-y-4" aria-live="polite" aria-relevant="additions text">
                 {messages.length === 0 && (
                   <div className="space-y-3">
                     <p className="text-[13px] leading-relaxed text-muted-foreground">
@@ -300,6 +345,23 @@ export function Chat({
                       }`}
                     >
                       {m.text}
+                      {m.isError && m.retryQuestion && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" onClick={() => ask(m.retryQuestion!)}>
+                            Retry question
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setConfig(null);
+                              setConfigNotice(null);
+                            }}
+                          >
+                            Change provider
+                          </Button>
+                        </div>
+                      )}
                     </div>
 
                     {/* A named stock that was not in any result is mechanically detectable,
@@ -334,14 +396,18 @@ export function Chat({
                           <table className="w-full text-[11px]">
                             <tbody className="divide-y">
                               {q.rows.map((row, ri) => (
-                                <tr
-                                  key={ri}
-                                  className="cursor-pointer hover:bg-muted"
-                                  onClick={() => row.symbol && onSelectStock(String(row.symbol))}
-                                >
+                                <tr key={ri}>
                                   {Object.entries(row).map(([k, v]) => (
                                     <td key={k} className="py-1 pr-2 tabular-nums text-muted-foreground">
-                                      {typeof v === 'number' ? Number(v.toFixed(2)) : String(v ?? '—')}
+                                      {k === 'symbol' && v ? (
+                                        <button
+                                          type="button"
+                                          className="font-medium text-foreground hover:underline"
+                                          onClick={() => onSelectStock(String(v))}
+                                        >
+                                          {String(v)}
+                                        </button>
+                                      ) : typeof v === 'number' ? Number(v.toFixed(2)) : String(v ?? '—')}
                                     </td>
                                   ))}
                                 </tr>
@@ -361,7 +427,11 @@ export function Chat({
                         >
                           {chart.symbol}
                         </button>
-                        <div className="h-40">
+                        <div
+                          className="h-40"
+                          role="img"
+                          aria-label={`${chart.symbol} six-month price history with ${chart.points.length} published closing-price points.`}
+                        >
                           <ResponsiveContainer width="100%" height="100%">
                             <ComposedChart data={chart.points}>
                               <XAxis dataKey="date" hide />
@@ -384,7 +454,7 @@ export function Chat({
                 ))}
 
                 {loading && (
-                  <div className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
+                  <div role="status" className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
                     <Loader2 className="size-4 animate-spin" /> {stage || 'Thinking…'}
                   </div>
                 )}
@@ -403,6 +473,7 @@ export function Chat({
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder="Ask about any stock or screen…"
+                  aria-label="Question for the AI assistant"
                   className="flex-1"
                 />
                 <Button type="submit" size="icon" disabled={!input.trim() || loading}>
@@ -413,8 +484,13 @@ export function Chat({
               <button
                 type="button"
                 onClick={() => {
-                  localStorage.removeItem(CONFIG_STORAGE);
-                  localStorage.removeItem('ml-gemini-key');
+                  try {
+                    localStorage.removeItem(CONFIG_STORAGE);
+                    localStorage.removeItem('ml-gemini-key');
+                    setConfigNotice(null);
+                  } catch {
+                    setConfigNotice('Browser storage could not be cleared. Remove this site’s data in browser settings.');
+                  }
                   setConfig(null);
                 }}
                 className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"

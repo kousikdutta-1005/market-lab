@@ -69,7 +69,13 @@ export function Caveats({ screen }: { screen: Screen }) {
   // Closed by default. This material is essential before acting on a score, but seven
   // expanded paragraphs above the board made the tool look like a legal disclaimer
   // instead of a research product. It stays one click away and remembers your choice.
-  const [open, setOpen] = useState(() => localStorage.getItem('ml-caveats-collapsed') === '0');
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem('ml-caveats-collapsed') === '0';
+    } catch {
+      return false;
+    }
+  });
   const items = controls(screen);
   const solved = items.filter((p) => p.status === 'solved').length;
   const mitigated = items.filter((p) => p.status === 'mitigated').length;
@@ -77,7 +83,11 @@ export function Caveats({ screen }: { screen: Screen }) {
   function toggle() {
     const next = !open;
     setOpen(next);
-    localStorage.setItem('ml-caveats-collapsed', next ? '0' : '1');
+    try {
+      localStorage.setItem('ml-caveats-collapsed', next ? '0' : '1');
+    } catch {
+      // Disclosure state remains usable for this visit.
+    }
   }
 
   return (

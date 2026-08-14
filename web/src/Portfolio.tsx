@@ -19,6 +19,42 @@ import { scoreColor, type Screen } from './types';
 
 const STORAGE = 'ml-portfolio';
 
+function readSavedPortfolio(): { holdings: Holding[]; notice: string | null } {
+  try {
+    const raw = localStorage.getItem(STORAGE);
+    if (!raw) return { holdings: [], notice: null };
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('saved value is not a list');
+    const valid = new Map<string, Holding>();
+    let removed = 0;
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') {
+        removed += 1;
+        continue;
+      }
+      const row = item as Record<string, unknown>;
+      const symbol = typeof row.symbol === 'string' ? row.symbol.trim().toUpperCase() : '';
+      const qty = typeof row.qty === 'number' ? row.qty : Number.NaN;
+      const avgPrice = row.avgPrice == null ? null : typeof row.avgPrice === 'number' ? row.avgPrice : Number.NaN;
+      if (!/^[A-Z][A-Z0-9&.-]{1,20}$/.test(symbol) || !Number.isFinite(qty) || qty <= 0 || (avgPrice != null && (!Number.isFinite(avgPrice) || avgPrice <= 0))) {
+        removed += 1;
+        continue;
+      }
+      if (valid.has(symbol)) removed += 1;
+      valid.set(symbol, { symbol, qty, avgPrice });
+    }
+    return {
+      holdings: [...valid.values()],
+      notice: removed ? `${removed} invalid or duplicate saved row${removed === 1 ? ' was' : 's were'} removed. Review the remaining holdings before relying on this analysis.` : null,
+    };
+  } catch {
+    return {
+      holdings: [],
+      notice: 'The saved portfolio could not be read, so it was not used. Start again or clear the damaged browser copy.',
+    };
+  }
+}
+
 function money(v: number | null | undefined) {
   if (v == null || Number.isNaN(v)) return '—';
   const abs = Math.abs(v);
@@ -88,27 +124,32 @@ export function PortfolioBody({
   const onOpenChange = (v: boolean) => {
     if (!v) onDone?.();
   };
-  const [holdings, setHoldings] = useState<Holding[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE) ?? '[]');
-    } catch {
-      return [];
-    }
-  });
+  const [saved] = useState(readSavedPortfolio);
+  const [holdings, setHoldings] = useState<Holding[]>(saved.holdings);
+  const [storageNotice, setStorageNotice] = useState<string | null>(saved.notice);
+  const [entryError, setEntryError] = useState<string | null>(null);
   const [symbol, setSymbol] = useState('');
   const [qty, setQty] = useState('');
   const [avg, setAvg] = useState('');
   const [corr, setCorr] = useState<Correlation | null>(null);
   const [corrLoading, setCorrLoading] = useState(false);
+  const [corrError, setCorrError] = useState(false);
+  const [corrAttempt, setCorrAttempt] = useState(0);
   const [perf, setPerf] = useState<Performance | null>(null);
   const [perfLoading, setPerfLoading] = useState(false);
+  const [perfError, setPerfError] = useState(false);
+  const [perfAttempt, setPerfAttempt] = useState(0);
   const [entry, setEntry] = useState<'single' | 'paste'>('single');
   const [paste, setPaste] = useState('');
   const [pasteMsg, setPasteMsg] = useState<string | null>(null);
   const [showEntry, setShowEntry] = useState(true);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE, JSON.stringify(holdings));
+    try {
+      localStorage.setItem(STORAGE, JSON.stringify(holdings));
+    } catch {
+      setStorageNotice('Changes are visible now but could not be saved in this browser. Export a copy before leaving this page.');
+    }
   }, [holdings]);
 
   const analysis: PortfolioAnalysis | null = useMemo(
@@ -123,14 +164,20 @@ export function PortfolioBody({
     }
     let cancelled = false;
     setCorrLoading(true);
+    setCorrError(false);
     analyseCorrelation(holdings.map((h) => h.symbol))
       .then((c) => !cancelled && setCorr(c))
-      .catch(() => !cancelled && setCorr(null))
+      .catch(() => {
+        if (!cancelled) {
+          setCorr(null);
+          setCorrError(true);
+        }
+      })
       .finally(() => !cancelled && setCorrLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [open, holdings]);
+  }, [open, holdings, corrAttempt]);
 
   useEffect(() => {
     if (!open || !analysis) {
@@ -139,19 +186,26 @@ export function PortfolioBody({
     }
     let cancelled = false;
     setPerfLoading(true);
+    setPerfError(false);
     analysePerformance(analysis.holdings)
       .then((r) => !cancelled && setPerf(r))
-      .catch(() => !cancelled && setPerf(null))
+      .catch(() => {
+        if (!cancelled) {
+          setPerf(null);
+          setPerfError(true);
+        }
+      })
       .finally(() => !cancelled && setPerfLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [open, analysis]);
+  }, [open, analysis, perfAttempt]);
 
   const findings = useMemo(
     () => (analysis ? deriveFindings(analysis, perf) : []),
     [analysis, perf],
   );
+  const sessionLabel = screen.last_trading_session || 'session unavailable';
 
   const importPasted = () => {
     const { holdings: parsed, skipped } = parseHoldings(paste);
@@ -159,27 +213,57 @@ export function PortfolioBody({
       setPasteMsg('Nothing recognisable. Use one holding per line: SYMBOL, quantity, average price.');
       return;
     }
+    const known = new Set(screen.stocks.map((stock) => stock.symbol.toUpperCase()));
+    const recognised = parsed.filter((holding) => known.has(holding.symbol));
+    const unknown = parsed.filter((holding) => !known.has(holding.symbol));
+    if (!recognised.length) {
+      setPasteMsg(`No current-universe ticker was found. Unknown: ${unknown.map((holding) => holding.symbol).join(', ') || 'none'}.`);
+      return;
+    }
+    let updated = 0;
     setHoldings((prev) => {
       const merged = new Map(prev.map((h) => [h.symbol.toUpperCase(), h]));
-      parsed.forEach((h) => merged.set(h.symbol.toUpperCase(), h));
+      recognised.forEach((h) => {
+        if (merged.has(h.symbol.toUpperCase())) updated += 1;
+        merged.set(h.symbol.toUpperCase(), h);
+      });
       return [...merged.values()];
     });
     setPaste('');
     setShowEntry(false);
     setPasteMsg(
-      `Added ${parsed.length} holding${parsed.length === 1 ? '' : 's'}` +
-        (skipped.length ? ` · skipped ${skipped.length} unreadable line${skipped.length === 1 ? '' : 's'}` : ''),
+      `${updated ? `Updated ${updated} existing and added ${recognised.length - updated}` : `Added ${recognised.length}`} holding${recognised.length === 1 ? '' : 's'}` +
+        (unknown.length ? ` · unknown tickers skipped: ${unknown.map((holding) => holding.symbol).join(', ')}` : '') +
+        (skipped.length ? ` · ${skipped.length} unreadable line${skipped.length === 1 ? '' : 's'} skipped` : ''),
     );
   };
 
   const add = () => {
     const s = symbol.toUpperCase().trim();
     const q = Number(qty);
-    if (!s || !q || q <= 0) return;
+    const average = avg.trim() ? Number(avg) : null;
+    if (!/^[A-Z][A-Z0-9&.-]{1,20}$/.test(s)) {
+      setEntryError('Enter a valid NSE symbol, such as RELIANCE.');
+      return;
+    }
+    if (!Number.isFinite(q) || q <= 0) {
+      setEntryError('Quantity must be a number greater than zero.');
+      return;
+    }
+    if (average != null && (!Number.isFinite(average) || average <= 0)) {
+      setEntryError('Average price must be greater than zero, or left blank.');
+      return;
+    }
+    if (!screen.stocks.some((stock) => stock.symbol.toUpperCase() === s)) {
+      setEntryError(`${s} is not in the current scored universe. It was not added because price, risk, and liquidity could not be verified.`);
+      return;
+    }
+    const duplicate = holdings.some((holding) => holding.symbol.toUpperCase() === s);
     setHoldings((prev) => [
       ...prev.filter((h) => h.symbol.toUpperCase() !== s),
-      { symbol: s, qty: q, avgPrice: avg ? Number(avg) : null },
+      { symbol: s, qty: q, avgPrice: average },
     ]);
+    setEntryError(duplicate ? `${s} already existed, so its quantity and average price were updated.` : null);
     setSymbol('');
     setQty('');
     setAvg('');
@@ -197,12 +281,33 @@ export function PortfolioBody({
     const blob = new Blob([[head.join(','), ...body].join('\n')], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `portfolio-${screen.last_trading_session}.csv`;
+    a.download = `portfolio-${screen.last_trading_session || 'unknown-session'}.csv`;
     a.click();
   };
 
   return (
     <div className="space-y-4">
+            {storageNotice && (
+              <Callout tone="warning" title="Portfolio storage needs attention">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span>{storageNotice}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      try {
+                        localStorage.removeItem(STORAGE);
+                        setStorageNotice(null);
+                      } catch {
+                        setStorageNotice('Browser storage is unavailable. This portfolio will remain session-only.');
+                      }
+                    }}
+                  >
+                    Clear saved copy
+                  </Button>
+                </div>
+              </Callout>
+            )}
             {holdings.length > 0 && !showEntry ? (
               <div className="flex items-center gap-2">
                 <span className="t-body text-muted-foreground">
@@ -249,30 +354,33 @@ export function PortfolioBody({
             )}
 
             {entry === 'single' && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                add();
-              }}
-              className="flex flex-wrap items-end gap-2"
-            >
-              <div className="min-w-28 flex-1">
-                <label className="t-label">Symbol</label>
-                <Input value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="RELIANCE" list="ml-symbols" />
-              </div>
-              <div className="w-24">
-                <label className="t-label">Qty</label>
-                <Input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="100" />
-              </div>
-              <div className="w-28">
-                <label className="t-label">Avg price</label>
-                <Input value={avg} onChange={(e) => setAvg(e.target.value)} inputMode="decimal" placeholder="optional" />
-              </div>
-              <Button type="submit" size="icon">
-                <Plus className="size-4" />
-                <span className="sr-only">Add holding</span>
-              </Button>
-            </form>
+            <>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  add();
+                }}
+                className="flex flex-wrap items-end gap-2"
+              >
+                <div className="min-w-28 flex-1">
+                  <label className="t-label" htmlFor="portfolio-symbol">Symbol</label>
+                  <Input id="portfolio-symbol" value={symbol} onChange={(e) => { setSymbol(e.target.value); setEntryError(null); }} placeholder="RELIANCE" list="ml-symbols" aria-invalid={!!entryError} aria-describedby={entryError ? 'portfolio-entry-error' : undefined} />
+                </div>
+                <div className="w-24">
+                  <label className="t-label" htmlFor="portfolio-quantity">Qty</label>
+                  <Input id="portfolio-quantity" value={qty} onChange={(e) => { setQty(e.target.value); setEntryError(null); }} inputMode="decimal" placeholder="100" aria-invalid={!!entryError} aria-describedby={entryError ? 'portfolio-entry-error' : undefined} />
+                </div>
+                <div className="w-28">
+                  <label className="t-label" htmlFor="portfolio-average">Avg price</label>
+                  <Input id="portfolio-average" value={avg} onChange={(e) => { setAvg(e.target.value); setEntryError(null); }} inputMode="decimal" placeholder="optional" aria-invalid={!!entryError} aria-describedby={entryError ? 'portfolio-entry-error' : undefined} />
+                </div>
+                <Button type="submit" size="icon" className="size-11 sm:size-8">
+                  <Plus className="size-4" />
+                  <span className="sr-only">Add holding</span>
+                </Button>
+              </form>
+              {entryError && <p id="portfolio-entry-error" role="alert" className="t-body text-danger">{entryError}</p>}
+            </>
             )}
             {holdings.length > 0 && (
               <Button variant="ghost" size="sm" onClick={() => setShowEntry(false)}>
@@ -297,11 +405,11 @@ export function PortfolioBody({
 
             {analysis && (
               <>
-                {analysis.coverage < 1 && (
+                {(analysis.coverage < 1 || analysis.unmatched.length > 0 || analysis.holdings.some((holding) => holding.issue)) && (
                   <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-subtle p-3 text-[13px] text-warning">
                     <TriangleAlert className="mt-0.5 size-4 shrink-0" />
                     <span>
-                      {(analysis.coverage * 100).toFixed(0)}% of value could be analysed.
+                      {analysis.totalValue > 0 ? `${(analysis.coverage * 100).toFixed(0)}% of priced value could be analysed.` : 'No current value could be calculated.'}
                       {analysis.unmatched.length > 0 && (
                         <> Not found in the scored universe: {analysis.unmatched.join(', ')}.</>
                       )}{' '}
@@ -370,7 +478,7 @@ export function PortfolioBody({
                 )}
 
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <Stat label="Current value" value={money(analysis.totalValue)} hint={`at ${screen.last_trading_session} close`} />
+                  <Stat label="Current value" value={money(analysis.totalValue)} hint={`at ${sessionLabel} close`} />
                   <Stat
                     label="P&L"
                     value={money(analysis.totalPnl)}
@@ -468,10 +576,16 @@ export function PortfolioBody({
                         </p>
                       </>
                     )}
-                    {!corrLoading && corr?.average == null && (
+                    {!corrLoading && !corrError && corr?.average == null && (
                       <p className="text-[13px] text-muted-foreground">
                         Needs at least two holdings with a year of shared price history.
                       </p>
+                    )}
+                    {!corrLoading && corrError && (
+                      <div role="alert" className="flex flex-wrap items-center justify-between gap-2 text-[13px] text-muted-foreground">
+                        <span>Price histories could not be loaded, so correlation is unavailable rather than estimated.</span>
+                        <Button variant="outline" size="sm" onClick={() => setCorrAttempt((attempt) => attempt + 1)}>Retry</Button>
+                      </div>
                     )}
                   </CardContent>
                 </Card>
@@ -496,7 +610,11 @@ export function PortfolioBody({
 
                     {!perfLoading && perf && (
                       <>
-                        <div className="h-52">
+                        <div
+                          className="h-52"
+                          role="img"
+                          aria-label={`Historical behavior of the current portfolio mix. Return ${pct(perf.totalReturn)}, market ${pct(perf.benchmarkReturn)}, volatility ${perf.annualisedVol != null ? `${(perf.annualisedVol * 100).toFixed(0)}%` : 'unavailable'}, worst fall ${pct(perf.maxDrawdown)}.`}
+                        >
                           <ResponsiveContainer width="100%" height="100%">
                             <AreaChart
                               data={perf.dates.map((d, i) => ({
@@ -570,10 +688,16 @@ export function PortfolioBody({
                       </>
                     )}
 
-                    {!perfLoading && !perf && (
+                    {!perfLoading && !perf && !perfError && (
                       <p className="t-body text-muted-foreground">
                         Needs at least one holding with a few months of shared price history.
                       </p>
+                    )}
+                    {!perfLoading && perfError && (
+                      <div role="alert" className="flex flex-wrap items-center justify-between gap-2 t-body text-muted-foreground">
+                        <span>Price history failed to load. Historical behavior and risk contribution are unavailable, not zero.</span>
+                        <Button variant="outline" size="sm" onClick={() => setPerfAttempt((attempt) => attempt + 1)}>Retry history</Button>
+                      </div>
                     )}
                   </CardContent>
                 </Card>
@@ -663,6 +787,8 @@ export function PortfolioBody({
                     <div className="grid grid-cols-2 gap-2">
                       <Stat label="High-risk weight" value={share(analysis.risk.highRiskWeight)} />
                       <Stat label="In F&O ban" value={share(analysis.risk.fnoBanWeight)} />
+                      <Stat label="Risk unavailable" value={share(analysis.risk.unknownRiskWeight)} />
+                      <Stat label="Liquidity unavailable" value={share(analysis.liquidity.unknownLiquidityWeight)} />
                       <Stat label="Price data only" value={share(analysis.risk.technicalOnlyWeight)} hint="no fundamentals available" />
                       <Stat label="Unrated" value={share(analysis.risk.unratedWeight)} />
                     </div>
@@ -718,6 +844,7 @@ export function PortfolioBody({
                               <button
                                 type="button"
                                 onClick={() => setHoldings((prev) => prev.filter((x) => x.symbol !== h.holding.symbol))}
+                                aria-label={`Remove ${h.holding.symbol}`}
                                 className="text-muted-foreground hover:text-destructive"
                               >
                                 <Trash2 className="size-3" />
@@ -732,7 +859,7 @@ export function PortfolioBody({
 
                 <Disclosure title="How every number here was produced" summary="Sources and formulas, in full.">
                   <ul className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
-                    <li><span className="text-foreground">Price</span> — official NSE bhavcopy close for {screen.last_trading_session}. Not a live tick.</li>
+                    <li><span className="text-foreground">Price</span> — official NSE bhavcopy close for {sessionLabel}. Not a live tick.</li>
                     <li><span className="text-foreground">Value</span> — quantity x that close. <span className="text-foreground">P&L</span> — value minus (avg price x quantity), only for holdings where you supplied a cost basis.</li>
                     <li><span className="text-foreground">Concentration</span> — HHI = sum of squared weights; effective holdings = 1/HHI.</li>
                     <li><span className="text-foreground">Exit days</span> — position value / (median daily traded value x 10%), using NSE turnover.</li>
@@ -749,7 +876,10 @@ export function PortfolioBody({
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setHoldings([])}
+                    onClick={() => {
+                      setHoldings([]);
+                      setStorageNotice(null);
+                    }}
                     className="text-muted-foreground"
                   >
                     Clear portfolio

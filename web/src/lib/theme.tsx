@@ -24,8 +24,12 @@ function systemPrefersDark() {
 
 function readStored(): ThemeChoice {
   if (typeof localStorage === 'undefined') return 'system';
-  const v = localStorage.getItem(STORAGE);
-  return v === 'light' || v === 'dark' || v === 'system' ? v : 'system';
+  try {
+    const v = localStorage.getItem(STORAGE);
+    return v === 'light' || v === 'dark' || v === 'system' ? v : 'system';
+  } catch {
+    return 'system';
+  }
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -50,7 +54,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setChoice = useCallback((c: ThemeChoice) => {
     setChoiceState(c);
-    localStorage.setItem(STORAGE, c);
+    try {
+      localStorage.setItem(STORAGE, c);
+    } catch {
+      // The visual choice still applies for this tab when storage is unavailable.
+    }
   }, []);
 
   const value = useMemo(() => ({ choice, resolved, setChoice }), [choice, resolved, setChoice]);

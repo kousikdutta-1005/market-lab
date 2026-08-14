@@ -62,9 +62,11 @@ export type PortfolioAnalysis = {
     fnoBanWeight: number;
     unratedWeight: number;
     technicalOnlyWeight: number;
+    unknownRiskWeight: number;
   };
   liquidity: {
     illiquidWeight: number;
+    unknownLiquidityWeight: number;
     worstDaysToExit: number | null;
     medianDaysToExit: number | null;
   };
@@ -174,9 +176,11 @@ export function analysePortfolio(holdings: Holding[], screen: Screen): Portfolio
       fnoBanWeight: weightOf((r) => !!r.stock?.fno_ban),
       unratedWeight: weightOf((r) => r.stock?.composite == null),
       technicalOnlyWeight: weightOf((r) => r.stock?.rating_basis === 'technical only'),
+      unknownRiskWeight: weightOf((r) => r.stock?.risk_level == null || r.stock?.risk_score == null),
     },
     liquidity: {
       illiquidWeight: weightOf((r) => (r.daysToExit ?? 0) > 5),
+      unknownLiquidityWeight: weightOf((r) => r.daysToExit == null),
       worstDaysToExit: exits.length ? exits[exits.length - 1] : null,
       medianDaysToExit: exits.length ? exits[Math.floor(exits.length / 2)] : null,
     },
@@ -210,6 +214,9 @@ export async function analyseCorrelation(symbols: string[], sessions = 252): Pro
       }
     }),
   );
+  if (series.every((item) => item == null)) {
+    throw new Error('No price histories could be loaded.');
+  }
 
   const usable = series.filter((s) => !!s && s.points.length > 30) as { sym: string; points: { date: string; close: number }[] }[];
   if (usable.length < 2) return { symbols: [], matrix: [], average: null, sessions: 0 };
@@ -350,6 +357,9 @@ export async function analysePerformance(
       }
     }),
   );
+  if (loaded.every((item) => item == null)) {
+    throw new Error('No price histories could be loaded.');
+  }
   const ok = loaded.filter((x) => x && x.points.length > 40) as { h: HoldingAnalysis; points: { date: string; close: number; market_return_pct: number | null }[] }[];
   if (!ok.length) return null;
 
@@ -477,7 +487,7 @@ export function parseHoldings(text: string): { holdings: Holding[]; skipped: str
     }
     const symbol = parts[0].toUpperCase().replace(/["']/g, '');
     // Header rows and stray text look like everything else, so validate rather than guess.
-    if (!/^[A-Z][A-Z0-9&.\-]{1,20}$/.test(symbol)) {
+    if (!/^[A-Z][A-Z0-9&.-]{1,20}$/.test(symbol)) {
       skipped.push(line);
       continue;
     }

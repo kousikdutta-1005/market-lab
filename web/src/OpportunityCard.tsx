@@ -52,9 +52,9 @@ function weakest(stock: Stock) {
   return { pillar: p, score: stock[p] as number, evidence: PILLAR_EVIDENCE[p](stock) };
 }
 
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function Stat({ label, value, hint, className = '' }: { label: string; value: string; hint?: string; className?: string }) {
   return (
-    <div className="min-w-0">
+    <div className={`min-w-0 ${className}`}>
       <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="truncate text-[13px] font-semibold text-foreground">{value}</div>
       {hint && <div className="truncate text-[11px] text-muted-foreground">{hint}</div>}
@@ -86,26 +86,29 @@ export function OpportunityCard({
       ? 'border-danger/30 bg-danger-subtle text-danger'
       : stock.risk_level === 'Watch'
         ? 'border-warning/30 bg-warning-subtle text-warning'
-        : 'border-success/30 bg-success-subtle text-success';
+        : stock.risk_level === 'Low'
+          ? 'border-success/30 bg-success-subtle text-success'
+          : 'border-warning/30 bg-warning-subtle text-warning';
 
   return (
     <button
       type="button"
       onClick={() => onSelect(stock.symbol)}
-      className="block w-full px-4 py-4 text-left transition-colors hover:bg-muted/50"
+      className="block w-full px-3 py-3 text-left transition-colors hover:bg-muted/50 sm:px-4 sm:py-4"
     >
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground">
+      <div className="flex items-start gap-2.5 sm:gap-3">
+        <span className="mt-0.5 hidden size-6 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground sm:grid">
           {rank}
         </span>
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-medium tabular-nums text-muted-foreground sm:hidden">#{rank}</span>
             <span className="font-semibold text-foreground">{stock.symbol}</span>
             {stock.bucket && <Badge variant="secondary">{BUCKET_LABEL[stock.bucket]}</Badge>}
             <Badge variant="outline" className={riskTone}>
               <ShieldAlert className="size-3" />
-              {stock.risk_level ?? 'unrated'} risk
+              {stock.risk_level ? `${stock.risk_level} risk` : 'risk unavailable'}
             </Badge>
             {stock.fno_ban && (
               <Badge variant="outline" className="border-danger/30 bg-danger-subtle text-danger">
@@ -123,7 +126,7 @@ export function OpportunityCard({
 
           {/* The case for, with the numbers behind it. */}
           {pros.length > 0 && (
-            <p className="mt-2 text-[13px] leading-relaxed text-foreground">
+            <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-foreground sm:mt-2 sm:text-[13px]">
               Ranks well on{' '}
               {pros.map((p, i) => (
                 <span key={p.pillar}>
@@ -138,7 +141,7 @@ export function OpportunityCard({
 
           {/* The case against, never hidden. */}
           {con && (
-            <p className="mt-1 flex items-start gap-1.5 text-[13px] leading-relaxed text-muted-foreground">
+            <p className="mt-1 flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground sm:text-[13px]">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" />
               <span>
                 Weakest on <span className="font-medium text-foreground">{con.pillar}</span> ({con.score.toFixed(0)}/100
@@ -148,7 +151,7 @@ export function OpportunityCard({
             </p>
           )}
 
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="mt-2.5 grid grid-cols-2 gap-2.5 sm:mt-3 sm:grid-cols-4 sm:gap-3">
             <Stat
               label="Scores highest for"
               value={stock.best_horizon ? HORIZON_LABEL[stock.best_horizon] : '—'}
@@ -158,6 +161,7 @@ export function OpportunityCard({
               label="Size"
               value={formatCrore(stock.market_cap)}
               hint={stock.sector ?? undefined}
+              className="hidden sm:block"
             />
             <Stat
               label="Avg daily turnover"
@@ -168,16 +172,17 @@ export function OpportunityCard({
               label="₹1L order impact"
               value={share != null ? `${(share * 100).toFixed(2)}% of a day` : '—'}
               hint={heavy ? 'you would move the price' : 'absorbed easily'}
+              className="hidden sm:block"
             />
           </div>
         </div>
 
         <div className="shrink-0 text-right">
-          <div className="text-2xl font-semibold tabular-nums tracking-[-0.03em] text-foreground">
+          <div className="text-[26px] font-semibold tabular-nums tracking-[-0.04em] text-foreground sm:text-2xl">
             {stock.opportunity_score?.toFixed(0) ?? '—'}
           </div>
           <div className="text-[10px] text-muted-foreground">research score</div>
-          <ArrowRight className="mt-2 ml-auto size-4 text-muted-foreground" />
+          <ArrowRight className="mt-2 ml-auto hidden size-4 text-muted-foreground sm:block" />
         </div>
       </div>
     </button>

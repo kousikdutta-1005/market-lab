@@ -166,6 +166,13 @@
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+
+  a:focus-visible,
+  button:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
 }
 @layer components {
   /* A single type scale. Ad-hoc text-[10px]/[12px] values had drifted across files and
@@ -177,4 +184,15 @@
   .t-label   { font-size: 11px; line-height: 1.4; font-weight: 500;
                text-transform: uppercase; letter-spacing: 0.06em;
                color: var(--muted-foreground); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

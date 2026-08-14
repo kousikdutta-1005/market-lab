@@ -24,6 +24,7 @@ import {
   Layers,
   LineChart as LineChartIcon,
   Percent,
+  RotateCw,
   Scale,
   ShieldAlert,
   TriangleAlert,
@@ -219,6 +220,7 @@ export function StockDetail({
   const [chart, setChart] = useState<StockChartResponse | null>(null);
   const [chartError, setChartError] = useState<string | null>(null);
   const [chartLoading, setChartLoading] = useState(false);
+  const [chartAttempt, setChartAttempt] = useState(0);
   const peerCount = screen.stocks.filter((x) => x.rating_basis === stock.rating_basis && x.bucket === stock.bucket).length;
   const flags = (stock.data_flags ?? '').split(',').filter(Boolean);
   const bucketLabel = stock.bucket ? BUCKET_LABEL[stock.bucket] : 'Unknown';
@@ -256,7 +258,7 @@ export function StockDetail({
     return () => {
       cancelled = true;
     };
-  }, [stock.symbol, chartRange]);
+  }, [stock.symbol, chartRange, chartAttempt]);
 
   const valuation: MetricSpec[] = [
     { label: 'Market cap', value: stock.market_cap, kind: 'currency' },
@@ -378,7 +380,12 @@ export function StockDetail({
             <ul className="space-y-1.5">
               {flags.map((f) => (
                 <li key={f} className="text-xs leading-relaxed text-warning">
-                  <span className="font-mono text-warning">{f}</span> — {FLAG_HELP[f] ?? 'Value suppressed.'}
+                  <span className="font-mono text-warning">{f}</span> — {
+                    FLAG_HELP[f] ??
+                    (f.startsWith('missing_')
+                      ? 'Required risk, liquidity, or horizon context is unavailable. Decision-shaped scores were suppressed.'
+                      : 'Value suppressed.')
+                  }
                 </li>
               ))}
             </ul>
@@ -417,7 +424,7 @@ export function StockDetail({
         <Section
           icon={BarChart3}
           title="Price, trend and participation"
-          subtitle={`Exchange EOD chart from NSE bhavcopy. Latest point: ${chart?.last_date ?? screen.last_trading_session}.`}
+          subtitle={`Exchange EOD chart from NSE bhavcopy. Latest point: ${chart?.last_date || screen.last_trading_session || 'unavailable'}.`}
         >
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <SegmentedControl
@@ -433,13 +440,29 @@ export function StockDetail({
 
           {chartLoading && <div className="grid h-60 place-items-center text-sm text-muted-foreground">Loading chart…</div>}
           {!chartLoading && chartError && (
-            <div className="rounded-lg border border-warning/30 bg-warning-subtle p-3 text-sm text-warning">
-              Chart unavailable: {chartError}
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning-subtle p-3 text-sm text-foreground">
+              <span>
+                <span className="font-medium">Price history is unavailable.</span>{' '}
+                <span className="text-muted-foreground">The scorecard remains visible, but trend context cannot be inspected. {chartError}</span>
+              </span>
+              <Button variant="outline" size="sm" onClick={() => setChartAttempt((attempt) => attempt + 1)}>
+                <RotateCw className="size-3" />
+                Retry chart
+              </Button>
+            </div>
+          )}
+          {!chartLoading && chart && chart.points.length === 0 && (
+            <div role="status" className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">
+              No price points are available for this range. Try another range; no zero-return line has been invented.
             </div>
           )}
           {!chartLoading && chart && chart.points.length > 0 && (
             <>
-              <div className="h-64">
+              <div
+                className="h-64"
+                role="img"
+                aria-label={`${stock.symbol} price history for ${chartRange}. Latest close ${lastChartPoint?.close != null ? `₹${lastChartPoint.close.toLocaleString('en-IN')}` : 'unavailable'}, range move ${lastChartPoint?.return_pct != null ? `${lastChartPoint.return_pct.toFixed(1)}%` : 'unavailable'}.`}
+              >
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={chart.points} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid stroke="var(--border)" vertical={false} />
@@ -542,15 +565,19 @@ export function StockDetail({
           <div className="grid gap-2 sm:grid-cols-4">
             <MiniStat label="Risk level" value={stock.risk_level ?? '—'} />
             <MiniStat label="Risk score" value={stock.risk_score?.toFixed(0) ?? '—'} />
-            <MiniStat label="F&O ban" value={stock.fno_ban ? 'Yes' : 'No'} />
+            <MiniStat label="F&O ban" value={stock.fno_ban == null ? 'Unavailable' : stock.fno_ban ? 'Yes' : 'No'} />
             <MiniStat label="Flags" value={(stock.risk_flags ? stock.risk_flags.split(',').length : 0).toLocaleString('en-IN')} />
           </div>
           {stock.risk_flags ? (
             <p className="mt-3 rounded-lg border border-warning/30 bg-warning-subtle p-3 text-xs leading-relaxed text-warning">
               {stock.risk_flags}
             </p>
-          ) : (
+          ) : stock.risk_level != null && stock.risk_score != null ? (
             <p className="mt-3 text-xs leading-relaxed text-muted-foreground">No major local risk flags fired for this symbol.</p>
+          ) : (
+            <p className="mt-3 rounded-lg border border-warning/30 bg-warning-subtle p-3 text-xs leading-relaxed text-foreground">
+              Risk coverage is unavailable for this row. Treat every fit and factor score as lower confidence until the risk layer is restored.
+            </p>
           )}
         </Section>
 
@@ -703,7 +730,7 @@ export function StockDetail({
         </>)}
 
         {pane === 'technicals' && (<>
-        <Section icon={Activity} title="Returns and technicals" subtitle={`Measured through ${screen.last_trading_session}.`}>
+        <Section icon={Activity} title="Returns and technicals" subtitle={`Measured through ${screen.last_trading_session || 'an unavailable session date'}.`}>
           <MetricGrid items={growth.slice(2)} />
           <div className="mt-2">
             <MetricGrid items={technicals} />
@@ -740,7 +767,11 @@ export function StockDetail({
 
         {radar.length >= 3 && (
           <Section icon={BarChart3} title="Factor shape" subtitle="The same five scores in radar form.">
-            <div className="h-56">
+            <div
+              className="h-56"
+              role="img"
+              aria-label={`${stock.symbol} factor scores: ${radar.map((item) => `${item.pillar} ${item.value.toFixed(0)}`).join(', ')}.`}
+            >
               <ResponsiveContainer width="100%" height="100%">
                 <RadarChart data={radar} outerRadius="72%">
                   <PolarGrid stroke="var(--border)" />
@@ -794,7 +825,7 @@ export function StockDetail({
         <p className="flex gap-2 text-xs leading-relaxed text-muted-foreground">
           <Info className="mt-0.5 size-3.5 shrink-0" />
           <span>
-            These are measured characteristics as of {screen.last_trading_session}, ranked against same-size peers on
+            These are measured characteristics as of {screen.last_trading_session || 'an unavailable session date'}, ranked against same-size peers on
             that date. They describe what this company looks like now — not what the share price will do next. High
             scores have no predictive guarantee.
           </span>

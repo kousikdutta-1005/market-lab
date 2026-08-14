@@ -32,7 +32,10 @@ export function Callout({
   const { box, mark, Icon } = tones[tone];
 
   return (
-    <div className={cn('flex items-start gap-2 rounded-lg border p-3 t-body', box, className)}>
+    <div
+      role={tone === 'danger' ? 'alert' : tone === 'warning' ? 'status' : undefined}
+      className={cn('flex items-start gap-2 rounded-lg border p-3 t-body', box, className)}
+    >
       <span className={cn('mt-0.5 shrink-0', mark)}>{icon ?? <Icon className="size-4" />}</span>
       <div className="min-w-0 flex-1">
         {title && <div className="font-semibold">{title}</div>}
